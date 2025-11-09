@@ -1,77 +1,61 @@
-// src/components/Header.tsx
-import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
-import Link from 'next/link';
+import { useEffect, useState } from "react";
+import Link from "next/link";
 
 export default function Header() {
-  const [user, setUser] = useState<any>(null);
+  const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
 
+  // Ustawienie motywu przy ładowaniu
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => listener.subscription.unsubscribe();
+    const storedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
+    if (
+      storedTheme === "dark" ||
+      (!storedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ) {
+      document.documentElement.classList.add("dark");
+      setTheme("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      setTheme("light");
+    }
   }, []);
 
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({ provider: 'google' });
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
+  // Funkcja przełączająca motyw
+  const toggleTheme = () => {
+    if (theme === "light") {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+      setTheme("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+      setTheme("light");
+    }
   };
 
   return (
-    <header
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '1rem 2rem',
-        borderBottom: '1px solid #eee',
-        marginBottom: '2rem',
-      }}
-    >
-      <Link href="/" style={{ textDecoration: 'none', fontWeight: 700, fontSize: '1.2rem' }}>
-        🎶 AlbumBase
-      </Link>
+    <header className="fixed top-0 left-0 w-full bg-white dark:bg-[#14181f] border-b border-gray-200 dark:border-gray-700 shadow-sm z-50 transition-colors duration-300">
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-3">
+        <Link href="/" className="text-xl font-bold text-gray-900 dark:text-white">
+          🎵 AlbumApp
+        </Link>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        {user ? (
-          <>
-            <Link href="/profile" style={{ color: '#2563eb', textDecoration: 'none' }}>
-              Profil
-            </Link>
-            <button
-              onClick={signOut}
-              style={{
-                background: '#ef4444',
-                color: 'white',
-                border: 'none',
-                borderRadius: 8,
-                padding: '0.5rem 0.75rem',
-                cursor: 'pointer',
-              }}
-            >
-              Wyloguj
-            </button>
-          </>
-        ) : (
+        <nav className="flex items-center gap-6 text-gray-700 dark:text-gray-300 text-sm">
+          <Link href="/favorites" className="hover:text-blue-500 dark:hover:text-blue-400 transition">
+            Ulubione
+          </Link>
+          <Link href="/profile" className="hover:text-blue-500 dark:hover:text-blue-400 transition">
+            Profil
+          </Link>
+
+          {/* 🌗 Przycisk zmiany motywu */}
           <button
-            onClick={signInWithGoogle}
-            style={{
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
-              padding: '0.5rem 0.75rem',
-              cursor: 'pointer',
-            }}
+            onClick={toggleTheme}
+            className="ml-4 p-2 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#1e232b] transition"
+            aria-label="Zmień motyw"
           >
-            Zaloguj przez Google
+            {theme === "dark" ? "🌞" : "🌙"}
           </button>
-        )}
+        </nav>
       </div>
     </header>
   );
