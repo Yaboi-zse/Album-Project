@@ -1,53 +1,60 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import { supabase } from '../../../src/lib/supabaseClient';
-import SpotifyWebApi from 'spotify-web-api-node';
+import type { NextApiRequest, NextApiResponse } from "next";
+import { supabase } from "../../../src/lib/supabaseClient";
+
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
+const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI!;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const code = req.query.code as string;
-  if (!code) return res.redirect('/?error=missing_code');
 
-  const spotifyApi = new SpotifyWebApi({
-    redirectUri: process.env.SPOTIFY_REDIRECT_URI!,
-    clientId: process.env.SPOTIFY_CLIENT_ID!,
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET!,
-  });
+  if (!code) {
+    return res.status(400).send("Missing Spotify code");
+  }
+
+  const creds = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
 
   try {
-    // Wymiana kodu na token
-    const data = await spotifyApi.authorizationCodeGrant(code);
-    const { access_token, refresh_token, expires_in } = data.body;
+    const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${creds}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+      }),
+    });
 
-    // Obliczamy datę wygaśnięcia tokena
-    const expiresAt = new Date();
-    expiresAt.setSeconds(expiresAt.getSeconds() + expires_in);
+    const tokenData = await tokenRes.json();
 
-    // Pobranie aktualnego zalogowanego użytkownika Supabase
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      console.error('❌ Brak zalogowanego użytkownika', userError);
-      return res.redirect('/?error=no_user');
+    if (tokenData.error) {
+      console.error("Spotify token error:", tokenData);
+      return res.status(400).json({ error: "Invalid token" });
     }
 
-    // Zapis tokenów do Supabase
-    const { error: dbError } = await supabase
-      .from('profiles')
-      .update({
-        spotify_access_token: access_token,
-        spotify_refresh_token: refresh_token,
-        spotify_expires_at: expiresAt,
-      })
-      .eq('id', user.id);
+    const { access_token, refresh_token, expires_in } = tokenData;
 
-    if (dbError) {
-      console.error('❌ Błąd przy zapisie tokenów do Supabase:', dbError);
-      return res.redirect('/?error=db_error');
+    // Zaktualizuj profil użytkownika (musisz być zalogowany w supabase)
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData?.user;
+
+    if (user) {
+      await supabase
+        .from("profiles")
+        .update({
+          spotify_access_token: access_token,
+          spotify_refresh_token: refresh_token,
+          spotify_expires_in: new Date(Date.now() + expires_in * 1000).toISOString(),
+        })
+        .eq("id", user.id);
     }
 
-    // Sukces!
-    res.redirect('/?success=1');
-  } catch (err: any) {
-    console.error('❌ Spotify callback error:', err.body || err);
-    res.redirect('/?error=spotify_auth_failed');
+    res.redirect("/");
+  } catch (err) {
+    console.error("Spotify callback error:", err);
+    res.status(500).send("Spotify auth failed");
   }
 }

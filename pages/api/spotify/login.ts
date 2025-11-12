@@ -1,15 +1,22 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import SpotifyWebApi from 'spotify-web-api-node';
+// /pages/api/spotify/login.ts
+import type { NextApiRequest, NextApiResponse } from "next";
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const spotifyApi = new SpotifyWebApi({
-    redirectUri: process.env.SPOTIFY_REDIRECT_URI!,
-    clientId: process.env.SPOTIFY_CLIENT_ID!,
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET!,
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
+const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI!; // np. http://localhost:3000/api/spotify/callback
+const SCOPES = [
+  "user-read-email",
+  "playlist-read-private",
+  "user-library-read",
+].join(" ");
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    redirect_uri: REDIRECT_URI,
   });
 
-  const scopes = ['user-read-private', 'user-read-email'];
-  const authorizeURL = spotifyApi.createAuthorizeURL(scopes, 'state');
-
-  res.redirect(authorizeURL);
+  const spotifyAuthURL = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  return res.redirect(spotifyAuthURL);
 }

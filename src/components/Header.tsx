@@ -1,34 +1,53 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { supabase } from "../lib/supabaseClient";
+import { useRouter } from "next/router";
 
 export default function Header() {
-  const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [user, setUser] = useState<any>(null);
+  const router = useRouter();
 
-  // Ustawienie motywu przy ładowaniu
+  // 🌓 Motyw
   useEffect(() => {
     const storedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
-    if (
-      storedTheme === "dark" ||
-      (!storedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)
-    ) {
-      document.documentElement.classList.add("dark");
-      setTheme("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      setTheme("light");
-    }
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const themeToSet = storedTheme || (prefersDark ? "dark" : "light");
+    setTheme(themeToSet);
+    document.documentElement.classList.toggle("dark", themeToSet === "dark");
   }, []);
 
-  // Funkcja przełączająca motyw
   const toggleTheme = () => {
-    if (theme === "light") {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-      setTheme("dark");
+    const newTheme = theme === "dark" ? "light" : "dark";
+    setTheme(newTheme);
+    localStorage.setItem("theme", newTheme);
+    document.documentElement.classList.toggle("dark", newTheme === "dark");
+  };
+
+  // 🔐 Sprawdzanie użytkownika i nasłuchiwanie sesji
+  useEffect(() => {
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setUser(data.session?.user ?? null);
+    };
+    getSession();
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleAuth = async () => {
+    if (user) {
+      await supabase.auth.signOut();
+      setUser(null);
+      router.push("/");
     } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-      setTheme("light");
+      router.push("/login");
     }
   };
 
@@ -47,13 +66,24 @@ export default function Header() {
             Profil
           </Link>
 
-          {/* 🌗 Przycisk zmiany motywu */}
+          {/* 🌗 Motyw */}
           <button
             onClick={toggleTheme}
             className="ml-4 p-2 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#1e232b] transition"
-            aria-label="Zmień motyw"
           >
             {theme === "dark" ? "🌞" : "🌙"}
+          </button>
+
+          {/* 🔑 Logowanie / Wylogowanie */}
+          <button
+            onClick={handleAuth}
+            className={`ml-4 px-3 py-2 rounded-lg transition text-white ${
+              user
+                ? "bg-red-500 hover:bg-red-600"
+                : "bg-blue-500 hover:bg-blue-600"
+            }`}
+          >
+            {user ? "Wyloguj się" : "Zaloguj się"}
           </button>
         </nav>
       </div>
