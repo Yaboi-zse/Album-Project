@@ -57,7 +57,7 @@ useEffect(() => {
 
     try {
       const isUUID = /^[0-9a-fA-F-]{8}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{12}$/.test(
-        trackId
+        trackId as string
       );
 
       // 🔥 poprawny SELECT – multiline, Supabase go akceptuje
@@ -66,13 +66,10 @@ useEffect(() => {
         .select("id, album_id, title, duration, track_number, spotify_id, spotify_url, preview_url, artist_name")
 ; 
       // 🔥 jeśli ID jest uuid → szukaj po id
-      if (isUUID) {
-        query = query.eq("id", trackId);
-      } else {
-        // 🔥 jeśli nie jest uuid → szukaj po spotify_id
-        query = query.eq("spotify_id", trackId);
+      if (trackId) {
+        if (isUUID) query = query.eq("id", trackId as string);
+        else query = query.eq("spotify_id", trackId as string);
       }
-
       const { data: local, error: localErr } = await query.maybeSingle();
 
       if (localErr) {
@@ -86,8 +83,8 @@ useEffect(() => {
       }
 
       // ---------- remote Spotify fallback ----------
-      const res = await fetch(`/api/spotify/track?track_id=${encodeURIComponent(trackId)}`);
-
+      const safeId = trackId ?? "";
+      const res = await fetch(`/api/spotify/track?track_id=${encodeURIComponent(safeId)}`);
       if (res.ok) {
         const t = await res.json();
 
@@ -144,8 +141,13 @@ useEffect(() => {
 
 // ---------- LOAD LYRICS ----------
 useEffect(() => {
-  if (!track || !track.title || !track.artist_name) {
-    console.log("loadLyrics NOT TRIGGERED – track incomplete", track);
+  if (!track) {
+    console.log("loadLyrics NOT TRIGGERED – track is null");
+    return;
+  }
+
+  if (!track.title || !track.artist_name) {
+    console.log("loadLyrics NOT TRIGGERED – missing title or artist", track);
     return;
   }
 
@@ -157,7 +159,8 @@ useEffect(() => {
     setLyricsLoading(true);
 
     try {
-      const q = `${track.title} ${track.artist_name}`;
+      if (!track) return;
+      const q = `${track.title ?? ""} ${track.artist_name ?? ""}`.trim();
       console.log("FETCHING GENIUS FOR:", q);
 
       const res = await fetch(`/api/genius/lyrics?q=${encodeURIComponent(q)}`);
@@ -183,8 +186,8 @@ useEffect(() => {
 
         let clean = payload.lyrics
         .split(/\r?\n/)
-        .map(l => l.trim())
-        .filter(l => {
+        .map((l: string) => l.trim())
+        .filter((l: string) => {
             // ❌ Contributors
             if (/^\d+\s*Contributors$/i.test(l)) return false;
 
