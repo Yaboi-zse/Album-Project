@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../src/lib/supabaseClient";
 import { motion } from "framer-motion";
+import { useFilters } from '../src/hooks/useFilters';
 
 function useDebounced<T>(value: T, delay = 400): T {
   const [v, setV] = useState(value);
@@ -13,27 +14,129 @@ function useDebounced<T>(value: T, delay = 400): T {
   return v;
 }
 
+// neon palette & helpers
+const NEON = {
+  blue: "#00eaff",
+  magenta: "#ff2dff",
+  purple: "#8a2be2",
+  cyan: "#00ffd5",
+};
+
+const RATING_COLORS: Record<number, string> = {
+  1: "#00bcd4",
+  2: "#29b6f6",
+  3: "#42a5f5",
+  4: "#5c6bc0",
+  5: "#7e57c2",
+  6: "#ab47bc",
+  7: "#ec407a",
+  8: "#ff7043",
+  9: "#ffa726",
+  10: "#ffca28",
+};
+
+const neonGlowStyle = (color: string) => ({
+  boxShadow: `0 8px 40px ${color}33, 0 0 18px ${color}66, inset 0 1px 0 ${color}22`,
+});
+
+function GenreTags({
+  genre,
+  collapseSignal,
+}: {
+  genre?: string | null;
+  collapseSignal: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (collapseSignal) setExpanded(false);
+  }, [collapseSignal]);
+
+  const raw = (genre ?? "").trim();
+  const list = raw.length
+    ? raw.split(",").map(g => g.trim()).filter(Boolean)
+    : [];
+
+  if (list.length === 0) return null;
+
+  const visible = expanded ? list : list.slice(0, 2);
+  const hiddenCount = Math.max(0, list.length - visible.length);
+
+  return (
+    <div
+      className="flex flex-wrap justify-center gap-2 mb-2 transition-all duration-150"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {visible.map((g) => (
+        <span
+          key={g}
+          className="text-[10px] px-2 py-0.5 rounded-full"
+          style={{
+            background: "rgba(0,234,255,0.08)",
+            border: "1px solid rgba(0,234,255,0.15)",
+            color: "#c6efff",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {g}
+        </span>
+      ))}
+
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          className="text-[10px] px-2 py-0.5 rounded-full"
+          style={{
+            background: expanded
+              ? "rgba(255,0,255,0.1)"
+              : "rgba(255,255,255,0.05)",
+            border: expanded
+              ? "1px solid rgba(255,0,255,0.25)"
+              : "1px solid rgba(255,255,255,0.12)",
+            color: "#e4f6ff",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            transition: "all 180ms ease",
+          }}
+        >
+          {expanded ? "−" : `+${hiddenCount}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
+
+  // UŻYJ HOOKA useFilters ZAMIAST LOCAL STATE
+  const {
+    search,
+    genreFilter,
+    yearFrom,
+    yearTo,
+    ratingMin,
+    sortBy,
+    page,
+    setPage
+  } = useFilters();
+
+  const debouncedSearch = useDebounced(search, 400);
 
   // data
   const [albums, setAlbums] = useState<any[]>([]);
   const [top10Albums, setTop10Albums] = useState<any[]>([]);
   const [total, setTotal] = useState<number | null>(0);
   const [artists, setArtists] = useState<any[]>([]);
+  const [genres, setGenres] = useState<string[]>([]);
 
-  // filters / pagination
-  const [search, setSearch] = useState("");
-  const [artistFilter, setArtistFilter] = useState("");
-  const [genreFilter, setGenreFilter] = useState("");
-  const [yearFrom, setYearFrom] = useState("");
-  const [yearTo, setYearTo] = useState("");
-  const [ratingMin, setRatingMin] = useState<number | "">("");
-  const [sortBy, setSortBy] = useState("title");
-  const [page, setPage] = useState(1);
+  const [artistFilter, setArtistFilter] = useState(""); // tylko ten pozostaje lokalny
   const limit = 20;
-  const debouncedSearch = useDebounced(search, 400);
-
   // slider config/state
   const CARD_WIDTH = 240;
   const GAP = 24;
@@ -45,16 +148,20 @@ export default function HomePage() {
   const [isPaused, setPaused] = useState(false);
   const TRANSITION_MS = 420;
 
-  // hover
+  // rating hover state
   const [hoveredRatingAlbum, setHoveredRatingAlbum] = useState<string | number | null>(null);
-  const hoverTimeoutRef = useRef<number | null>(null);
+  const [hoveredRatingValue, setHoveredRatingValue] = useState<number | null>(null);
 
   const top10 = top10Albums || [];
 
   useEffect(() => {
     function update() {
-      const w = window.innerWidth;
+      const refWidth = containerRef.current?.offsetWidth;
+      const effectiveWidth = refWidth && refWidth > 0 ? refWidth : window.innerWidth;
+
       let v = 4;
+      const w = window.innerWidth;
+
       if (w < 640) v = 1;
       else if (w < 900) v = 2;
       else if (w < 1200) v = 3;
@@ -62,8 +169,9 @@ export default function HomePage() {
       else v = 5;
 
       setVisibleCount(v);
-      setContainerWidth(containerRef.current?.offsetWidth ?? window.innerWidth);
+      setContainerWidth(effectiveWidth);
     }
+
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
@@ -97,13 +205,26 @@ export default function HomePage() {
   // data fetching
   useEffect(() => {
     fetchArtists();
+    fetchGenres();
     fetchAlbums();
     fetchTop10Albums();
   }, []);
 
+  // USUŃ STARY useEffect DO ODCZYTU Z URL - teraz to robi useFilters
+
+  // fetch albums gdy zmienią się filtry
   useEffect(() => {
     fetchAlbums();
-  }, [page, artistFilter, genreFilter, yearFrom, yearTo, ratingMin, debouncedSearch, sortBy]);
+  }, [
+    page, 
+    artistFilter, 
+    genreFilter, 
+    yearFrom, 
+    yearTo, 
+    ratingMin, 
+    debouncedSearch, 
+    sortBy
+  ]);
 
   useEffect(() => {
     const ch1 = supabase
@@ -120,106 +241,156 @@ export default function HomePage() {
         fetchTop10Albums();
       });
 
-    ch1.subscribe();
-    ch2.subscribe();
+    void ch1.subscribe();
+    void ch2.subscribe();
 
     return () => {
-      supabase.removeChannel(ch1);
-      supabase.removeChannel(ch2);
+      void supabase.removeChannel(ch1);
+      void supabase.removeChannel(ch2);
     };
   }, []);
 
-  const updateURL = () => {
-    const params: Record<string, string> = {};
-    if (debouncedSearch) params.q = debouncedSearch;
-    if (artistFilter) params.artist = artistFilter;
-    if (genreFilter) params.genre = genreFilter;
-    if (yearFrom) params.yearFrom = yearFrom;
-    if (yearTo) params.yearTo = yearTo;
-    if (ratingMin !== "") params.rmin = String(ratingMin);
-    if (sortBy !== "title") params.sort = sortBy;
-    if (page > 1) params.index = String(page);
-
-    router.replace({ pathname: "/", query: params }, undefined, { shallow: true });
-  };
+  // USUŃ updateURL - teraz to robi useFilters
 
   async function fetchArtists() {
     const { data } = await supabase.from("artists").select("id, name").order("name");
     setArtists(data || []);
   }
 
+  async function fetchGenres() {
+    const { data } = await supabase
+      .from("albums")
+      .select("genre")
+      .not("genre", "is", null);
+
+    if (!data) return setGenres([]);
+
+    const uniq = Array.from(
+      new Set(
+        data
+          .flatMap(a =>
+            (a.genre || "")
+              .split(",")
+              .map((g: string) => g.trim())
+              .filter(Boolean)
+          )
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    setGenres(uniq);
+  }
+
   async function fetchAlbums() {
+
     try {
+      try {
+    console.log("🔄 fetchAlbums called with:", {
+      search,
+      genreFilter, 
+      yearFrom,
+      yearTo,
+      ratingMin,
+      page,
+      debouncedSearch
+    });
+  } catch {}
       const p_offset = (page - 1) * limit;
 
+      // 1) total count
       const { count: totalCount } = await supabase
         .from("albums")
         .select("*", { count: "exact", head: true });
-
       setTotal(totalCount ?? 0);
 
+      // 2) base query
       let query = supabase
         .from("albums")
-        .select(`id, title, year, cover_url, artist_id, artists(name)`)
+        .select(`id, title, year, genre, cover_url, artist_id, artists(name)`)
         .range(p_offset, p_offset + limit - 1);
 
-      if (artistFilter) query = query.eq("artist_id", artistFilter);
-      if (genreFilter && genreFilter !== "__NO_GENRE__") query = query.eq("genre", genreFilter);
+      // UŻYJ PARAMETRÓW Z useFilters
+      // search filter
       if (debouncedSearch) query = query.ilike("title", `%${debouncedSearch}%`);
 
+      // genre filter
+      if (genreFilter) {
+        const genreList = genreFilter.split(',').map(g => g.trim()).filter(Boolean);
+        if (genreList.length > 0) {
+          const orConditions = genreList.map(genre => `genre.ilike.%${genre}%`).join(',');
+          query = query.or(orConditions);
+        }
+      }
+
+      // year filters
+      if (yearFrom) query = query.gte("year", parseInt(yearFrom));
+      if (yearTo) query = query.lte("year", parseInt(yearTo));
+
+      // artist filter
+      if (artistFilter) query = query.eq("artist_id", artistFilter);
+
+      // sorting
       if (sortBy === "title") query = query.order("title", { ascending: true });
       else if (sortBy === "year") query = query.order("year", { ascending: false });
+
 
       const { data: rows } = await query;
 
       if (!rows || rows.length === 0) {
         setAlbums([]);
-        updateURL();
         return;
       }
+      const ids = rows.map((r) => r.id);
 
-      const ids = rows.map(r => r.id);
-
+      // 3) ratings / favorites / user data
       const [{ data: ratings }, { data: favs }, { data: userData }] = await Promise.all([
         supabase.from("ratings").select("album_id, rating").in("album_id", ids),
         supabase.from("favorites").select("album_id").in("album_id", ids),
         supabase.auth.getUser(),
       ]);
 
-      const user = userData?.user;
+      const currentUser = userData?.user ?? null;
+
       let userRatings: any[] = [];
       let userFavs: any[] = [];
 
-      if (user) {
+      if (currentUser) {
         const [{ data: ur }, { data: uf }] = await Promise.all([
-          supabase.from("ratings").select("album_id, rating").eq("user_id", user.id).in("album_id", ids),
-          supabase.from("favorites").select("album_id").eq("user_id", user.id).in("album_id", ids),
+          supabase.from("ratings").select("album_id, rating").eq("user_id", currentUser.id).in("album_id", ids),
+          supabase.from("favorites").select("album_id").eq("user_id", currentUser.id).in("album_id", ids),
         ]);
-
         userRatings = ur || [];
         userFavs = uf || [];
       }
 
+      // group ratings & favs
       const ratingsByAlbum: Record<string, number[]> = {};
-      (ratings || []).forEach(r => {
-        ratingsByAlbum[r.album_id] = ratingsByAlbum[r.album_id] || [];
+      (ratings || []).forEach((r) => {
+        if (!ratingsByAlbum[r.album_id]) ratingsByAlbum[r.album_id] = [];
         ratingsByAlbum[r.album_id].push(Number(r.rating));
       });
 
       const favCount: Record<string, number> = {};
-      (favs || []).forEach(f => {
+      (favs || []).forEach((f) => {
         favCount[f.album_id] = (favCount[f.album_id] || 0) + 1;
       });
 
-      const combined = rows.map(a => {
+      // 4) merge
+      let combined = rows.map((a: any) => {
         const r = ratingsByAlbum[a.id] || [];
         const avg = r.length > 0 ? Number((r.reduce((s, x) => s + x, 0) / r.length).toFixed(1)) : "—";
-        const userRatingObj = userRatings.find(ur => ur.album_id === a.id);
-        const isFav = userFavs.some(f => f.album_id === a.id);
+        const userRatingObj = userRatings.find((ur) => ur.album_id === a.id);
+        const isFav = userFavs.some((f) => f.album_id === a.id);
+
+        // normalize artist_name
+        const artist_name = Array.isArray(a.artists) 
+          ? a.artists[0]?.name ?? null 
+          : a.artists?.name ?? "Nieznany artysta";
 
         return {
           ...a,
-          artist_name: a.artists?.name || "Nieznany artysta",
+          artist_name,
+          genre: a.genre ?? null,
+          is_single: a.genre == null,
           avg_rating: avg,
           votes: r.length,
           favorites_count: favCount[a.id] || 0,
@@ -227,173 +398,152 @@ export default function HomePage() {
           user_rating: userRatingObj ? Number(userRatingObj.rating) : null,
         };
       });
+
+      // 5) APPLY RATING FILTER CLIENT-SIDE
+      if (ratingMin !== "") {
+        combined = combined.filter(album => {
+          if (album.avg_rating === "—") return false;
+          return Number(album.avg_rating) >= Number(ratingMin);
+        });
+      }
+
+      // 6) APPLY GENRE FILTER CLIENT-SIDE
+      if (genreFilter) {
+        const genreList = genreFilter.split(',').map(g => g.trim()).filter(Boolean);
+        if (genreList.length > 0) {
+          combined = combined.filter(album => {
+            if (!album.genre) return false;
+            const albumGenres = album.genre.split(',').map((g: string) => g.trim());
+            return genreList.some(selectedGenre => 
+              albumGenres.some((albumGenre: string) => 
+                albumGenre.toLowerCase().includes(selectedGenre.toLowerCase())
+              )
+            );
+          });
+        }
+      }
 
       setAlbums(combined);
-      updateURL();
     } catch (e) {
-      console.error("fetchAlbums", e);
+      console.error("fetchAlbums:", e);
+      setAlbums([]);
     }
   }
 
-  async function fetchTop10Albums() {
-    try {
-      // Najpierw pobierz wszystkie oceny i policz średnie
-      const { data: allRatings } = await supabase
-        .from("ratings")
-        .select("album_id, rating");
+async function fetchTop10Albums() {
+  try {
+    // Najpierw pobierz wszystkie oceny i oblicz średnie
+    const { data: ratingsData } = await supabase
+      .from("ratings")
+      .select("album_id, rating");
 
-      if (!allRatings) return setTop10Albums([]);
-
-      // Oblicz średnie oceny dla każdego albumu
-      const ratingsByAlbum: Record<string, number[]> = {};
-      allRatings.forEach(r => {
-        ratingsByAlbum[r.album_id] = ratingsByAlbum[r.album_id] || [];
-        ratingsByAlbum[r.album_id].push(Number(r.rating));
-      });
-
-      // Pobierz albumy które mają oceny
-      const albumIdsWithRatings = Object.keys(ratingsByAlbum);
-      
-      if (albumIdsWithRatings.length === 0) return setTop10Albums([]);
-
-      const { data: albumsRaw } = await supabase
-        .from("albums")
-        .select(`id, title, cover_url, artist_id, artists(name), year`)
-        .in("id", albumIdsWithRatings);
-
-      if (!albumsRaw) return setTop10Albums([]);
-
-      // Pobierz ulubione
-      const { data: favs } = await supabase
-        .from("favorites")
-        .select("album_id");
-
-      const favCount: Record<string, number> = {};
-      (favs || []).forEach(f => {
-        favCount[f.album_id] = (favCount[f.album_id] || 0) + 1;
-      });
-
-      // Pobierz oceny użytkownika jeśli jest zalogowany
-      const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user;
-      let userRatings: any[] = [];
-      let userFavs: any[] = [];
-
-      if (user) {
-        const [{ data: ur }, { data: uf }] = await Promise.all([
-          supabase.from("ratings").select("album_id, rating").eq("user_id", user.id).in("album_id", albumIdsWithRatings),
-          supabase.from("favorites").select("album_id").eq("user_id", user.id).in("album_id", albumIdsWithRatings),
-        ]);
-
-        userRatings = ur || [];
-        userFavs = uf || [];
-      }
-
-      const merged = albumsRaw.map(a => {
-        const r = ratingsByAlbum[a.id] || [];
-        const avg = r.length ? Number((r.reduce((s, x) => s + x, 0) / r.length).toFixed(1)) : 0;
-        const userRatingObj = userRatings.find(ur => ur.album_id === a.id);
-        const isFav = userFavs.some(f => f.album_id === a.id);
-
-        return {
-          ...a,
-          artist_name: a.artists?.name || "Nieznany artysta",
-          avg_rating: avg,
-          votes: r.length,
-          favorites_count: favCount[a.id] || 0,
-          is_favorite: isFav,
-          user_rating: userRatingObj ? Number(userRatingObj.rating) : null,
-        };
-      });
-
-      // Sortuj po średniej ocenie, liczbie głosów, ulubionych
-      const sorted = merged.sort((a, b) => {
-        // Najpierw po średniej ocenie
-        if (b.avg_rating !== a.avg_rating) {
-          return b.avg_rating - a.avg_rating;
-        }
-        // Potem po liczbie głosów
-        if (b.votes !== a.votes) {
-          return b.votes - a.votes;
-        }
-        // Potem po liczbie ulubionych
-        if (b.favorites_count !== a.favorites_count) {
-          return b.favorites_count - a.favorites_count;
-        }
-        // Na końcu po roku
-        return b.year - a.year;
-      });
-
-      setTop10Albums(sorted.slice(0, 10));
-    } catch (e) {
-      console.error("fetchTop10Albums", e);
+    if (!ratingsData) {
+      setTop10Albums([]);
+      return;
     }
+
+    // Oblicz średnie oceny dla każdego albumu
+    const albumRatings: Record<string, { sum: number; count: number }> = {};
+    
+    ratingsData.forEach(rating => {
+      if (!albumRatings[rating.album_id]) {
+        albumRatings[rating.album_id] = { sum: 0, count: 0 };
+      }
+      albumRatings[rating.album_id].sum += rating.rating;
+      albumRatings[rating.album_id].count += 1;
+    });
+
+    // Oblicz średnie i posortuj albumy według średniej oceny
+    const albumsWithAvgRating = Object.entries(albumRatings)
+      .map(([album_id, data]) => ({
+        album_id,
+        avg_rating: Number((data.sum / data.count).toFixed(1)),
+        votes: data.count
+      }))
+      .sort((a, b) => b.avg_rating - a.avg_rating)
+      .slice(0, 10);
+
+    // Jeśli nie ma albumów z ocenami, zakończ
+    if (albumsWithAvgRating.length === 0) {
+      setTop10Albums([]);
+      return;
+    }
+
+    // Pobierz szczegóły albumów z top 10
+    const albumIds = albumsWithAvgRating.map(item => item.album_id);
+    
+    const { data: albumsData } = await supabase
+      .from("albums")
+      .select(`
+        id,
+        title,
+        year,
+        genre,
+        cover_url,
+        artist_id,
+        artists(name)
+      `)
+      .in("id", albumIds);
+
+    if (!albumsData) {
+      setTop10Albums([]);
+      return;
+    }
+
+    // Połącz dane albumów ze średnimi ocenami
+    const albumsWithDetails = albumsData.map(album => {
+      const ratingInfo = albumsWithAvgRating.find(item => item.album_id === album.id);
+      return {
+        ...album,
+        artist_name: Array.isArray(album.artists) 
+          ? album.artists[0]?.name ?? "Nieznany artysta"
+          : album.artists?.name ?? "Nieznany artysta",
+        avg_rating: ratingInfo?.avg_rating ?? 0,
+        votes: ratingInfo?.votes ?? 0,
+      };
+    });
+
+    // Posortuj według średniej oceny (ponownie, na wypadek zmiany kolejności)
+    const sortedAlbums = albumsWithDetails.sort((a, b) => b.avg_rating - a.avg_rating);
+
+    // Pobierz dane użytkownika dla top 10 albumów
+    const { data: userData } = await supabase.auth.getUser();
+    const currentUser = userData?.user;
+
+    let userRatings: any[] = [];
+    let userFavs: any[] = [];
+
+    if (currentUser) {
+      const [{ data: ur }, { data: uf }] = await Promise.all([
+        supabase.from("ratings").select("album_id, rating").eq("user_id", currentUser.id).in("album_id", albumIds),
+        supabase.from("favorites").select("album_id").eq("user_id", currentUser.id).in("album_id", albumIds),
+      ]);
+      userRatings = ur || [];
+      userFavs = uf || [];
+    }
+
+    // Dodaj dane użytkownika do top 10
+    const top10WithUserData = sortedAlbums.map(album => {
+      const userRatingObj = userRatings.find(ur => ur.album_id === album.id);
+      const isFav = userFavs.some(f => f.album_id === album.id);
+
+      return {
+        ...album,
+        is_favorite: isFav,
+        user_rating: userRatingObj ? Number(userRatingObj.rating) : null,
+        favorites_count: userFavs.filter(f => f.album_id === album.id).length,
+      };
+    });
+
+    setTop10Albums(top10WithUserData);
+    
+    // Debug: sprawdź dane
+    console.log("Top 10 albums data:", top10WithUserData);
+  } catch (error) {
+    console.error("Error fetching top 10 albums:", error);
+    setTop10Albums([]);
   }
-
-  const toggleFavorite = async (albumId: string | number, isFav: boolean) => {
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData?.user;
-    if (!user) return alert("Musisz być zalogowany");
-
-    try {
-      if (isFav) {
-        await supabase
-          .from("favorites")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("album_id", albumId);
-      } else {
-        await supabase
-          .from("favorites")
-          .insert({ 
-            user_id: user.id, 
-            album_id: albumId 
-          });
-      }
-
-      fetchAlbums();
-      fetchTop10Albums();
-    } catch (error) {
-      console.error("Error toggling favorite:", error);
-    }
-  };
-
-  const upsertRating = async (albumId: string | number, value: number) => {
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData?.user;
-    if (!user) return alert("Musisz być zalogowany");
-
-    try {
-      // Najpierw spróbuj update, potem insert
-      const { error: updateError } = await supabase
-        .from("ratings")
-        .update({ rating: value })
-        .eq("user_id", user.id)
-        .eq("album_id", albumId);
-
-      if (updateError) {
-        // Jeśli update nie zadziałał, spróbuj insert
-        const { error: insertError } = await supabase
-          .from("ratings")
-          .insert({ 
-            user_id: user.id, 
-            album_id: albumId, 
-            rating: value 
-          });
-
-        if (insertError) {
-          console.error("Error inserting rating:", insertError);
-          return;
-        }
-      }
-
-      fetchAlbums();
-      fetchTop10Albums();
-    } catch (error) {
-      console.error("Error upserting rating:", error);
-    }
-  };
-
+}
   const goNext = () => {
     const max = Math.max(0, top10.length - visibleCount);
     setSlideIndex(s => (s >= max ? 0 : s + 1));
@@ -422,370 +572,502 @@ export default function HomePage() {
     visible: { opacity: 1, y: 0, scale: 1 },
   };
 
-  // Funkcje do zarządzania hoverem
+  // hover helpers
   const handleMouseEnter = (albumId: string | number) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
     setHoveredRatingAlbum(albumId);
+    setHoveredRatingValue(null);
   };
 
   const handleMouseLeave = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-    }
-    hoverTimeoutRef.current = window.setTimeout(() => {
-      setHoveredRatingAlbum(null);
-    }, 150);
+    setHoveredRatingAlbum(null);
+    setHoveredRatingValue(null);
   };
 
-  const handleRatingClick = (albumId: string | number, value: number) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
+  const handleRatingHover = (value: number | null) => {
+    setHoveredRatingValue(value);
+  };
+const toggleFavorite = async (albumId: string | number, isFav: boolean) => {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData?.user;
+  if (!user) return alert("Musisz być zalogowany");
+
+  try {
+    if (isFav) {
+      await supabase.from("favorites").delete().eq("user_id", user.id).eq("album_id", albumId);
+    } else {
+      await supabase.from("favorites").insert({ user_id: user.id, album_id: albumId });
     }
+    fetchAlbums();
+    fetchTop10Albums();
+  } catch (error) {
+    console.error("Error toggling favorite:", error);
+  }
+};
+
+const upsertRating = async (albumId: string | number, value: number) => {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData?.user;
+  if (!user) return alert("Musisz być zalogowany");
+
+  try {
+    const { error: updateError } = await supabase
+      .from("ratings")
+      .update({ rating: value })
+      .eq("user_id", user.id)
+      .eq("album_id", albumId);
+
+    if (updateError) {
+      const { error: insertError } = await supabase
+        .from("ratings")
+        .insert({ user_id: user.id, album_id: albumId, rating: value });
+
+      if (insertError) {
+        console.error("Error inserting rating:", insertError);
+        return;
+      }
+    }
+
+    fetchAlbums();
+    fetchTop10Albums();
+  } catch (error) {
+    console.error("Error upserting rating:", error);
+  }
+};
+
+  const handleRatingClick = (albumId: string | number, value: number) => {
     upsertRating(albumId, value);
-    setHoveredRatingAlbum(null);
   };
 
   return (
-    <main className="px-6 py-10 min-h-screen bg-gray-50 dark:bg-[#0b0e11] text-gray-900 dark:text-gray-100">
-      <div className="max-w-7xl mx-auto">
+    <main
+      className="pt-24 pb-10 min-h-screen"
+      style={{
+        background:
+          "radial-gradient(1200px 600px at 10% 10%, rgba(138,43,226,0.06), transparent), radial-gradient(1000px 500px at 90% 90%, rgba(0,234,255,0.04), transparent), #03060a",
+        color: "#e6eef8",
+        WebkitFontSmoothing: "antialiased",
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4">
+        {/* HEADER */}
+        <header className="flex items-center justify-between mb-10">
+          <div className="flex items-center gap-4">
+          </div>
+        </header>
 
         {/* TOP 10 SLIDER */}
-        <h2 className="text-3xl font-bold mb-6 flex items-center gap-3">🔥 Top 10 albumów</h2>
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 flex items-center gap-3" style={{ color: "#f7f9ff" }}>
+            🔥 Top 10 albumów
+          </h2>
 
-        <div
-          ref={containerRef}
-          className="relative overflow-hidden pb-8"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-        >
           <div
-            className="flex gap-6"
-            style={{
-              transform: `translateX(${calcTranslate()}px)`,
-              transition: `transform ${TRANSITION_MS}ms ease`,
-            }}
+            ref={containerRef}
+            className="relative overflow-hidden pb-8"
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
           >
-            {top10.map((album, i) => (
-              <div
-                key={album.id}
-                className="w-[240px] min-w-[240px] bg-[#171b20] rounded-xl border border-gray-700 shadow relative overflow-visible"
-              >
-                <div className="absolute top-2 left-2 bg-yellow-400 text-black px-2 py-1 rounded text-xs z-30 font-bold">
-                  #{i + 1}
-                </div>
-
-                {/* ------ SLIDER COVER ------ */}
-                <div
-                  className="relative h-48 w-full"
-                  onMouseEnter={() => handleMouseEnter(album.id)}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  {/* OKŁADKA */}
-                  <img
-                    src={album.cover_url}
-                    alt={album.title}
-                    className="h-full w-full object-cover rounded-t-xl"
-                  />
-
-                  {/* OVERLAY NA OKŁADCE */}
-                  <div
-                    className="absolute inset-0 flex items-center justify-center rounded-t-xl"
+            <div
+              className="flex gap-6 transition-transform duration-300 ease-out"
+              style={{
+                transform: `translateX(${calcTranslate()}px)`,
+              }}
+            >
+              {top10.map((album, i) => {
+                const isHovered = hoveredRatingAlbum === album.id;
+                return (
+                  <motion.div
+                    key={album.id}
+                    className="w-60 min-w-60 rounded-xl border border-transparent relative overflow-visible cursor-pointer shrink-0"
+                    initial={{ scale: 1 }}
+                    animate={isHovered ? { scale: 1.06 } : { scale: 1 }}
+                    transition={{ duration: 0.18 }}
                     style={{
-                      opacity: hoveredRatingAlbum === album.id ? 1 : 0,
-                      transition: "opacity 150ms ease",
-                      pointerEvents: hoveredRatingAlbum === album.id ? "auto" : "none",
+                      background: "linear-gradient(180deg, rgba(8,10,15,0.8), rgba(8,10,15,0.6))",
+                      border: `1px solid rgba(255,255,255,0.03)`,
+                      ...(isHovered ? neonGlowStyle(NEON.blue) : { boxShadow: "0 6px 18px rgba(0,0,0,0.4)" }),
                     }}
+                    onClick={() => router.push(`/album/${album.id}`)}
                   >
+                    <div className="absolute top-2 left-2 bg-linear-to-r from-purple-500 to-cyan-400 text-black px-2 py-1 rounded text-xs z-40 font-bold">
+                      #{i + 1}
+                    </div>
+
+                    {/* COVER + OVERLAY */}
                     <div
-                      className="absolute inset-0 rounded-t-xl pointer-events-none"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.4), rgba(0,0,0,0.6))",
-                      }}
-                    />
-
-                    <motion.div
-                      className="relative z-10 w-full px-3"
-                      initial="hidden"
-                      animate={hoveredRatingAlbum === album.id ? "visible" : "hidden"}
-                      variants={overlayVariants}
-                      transition={{ duration: 0.18, ease: "easeOut" }}
+                      className="relative h-48 w-full rounded-xl overflow-hidden"
+                      onMouseEnter={() => handleMouseEnter(album.id)}
+                      onMouseLeave={handleMouseLeave}
                     >
-                      <div className="grid grid-cols-10 gap-[2px] w-full">
-                        {Array.from({ length: 10 }).map((_, idx) => {
-                          const value = idx + 1;
-                          const active = album.user_rating === value;
-
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={e => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleRatingClick(album.id, value);
-                              }}
-                              style={buttonStyle}
-                              className={`aspect-square rounded-full flex items-center justify-center text-[10px] font-bold transition 
-                                ${
-                                  active
-                                    ? "bg-yellow-400 text-black scale-110"
-                                    : "bg-gray-700 text-white hover:bg-yellow-300 hover:text-black hover:scale-110"
-                                }`}
-                            >
-                              {value}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  </div>
-                </div>
-
-                {/* ------ PANEL ALBUMU ------ */}
-                <div className="p-3">
-                  <p className="font-semibold text-sm text-white line-clamp-2">{album.title}</p>
-                  <p className="text-xs text-gray-400">{album.artist_name}</p>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-yellow-400">
-                      ⭐ {album.avg_rating ?? "—"}
-                      <span className="text-xs text-gray-300">({album.votes} głosów)</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleFavorite(album.id, album.is_favorite);
+                      <img
+                        src={album.cover_url}
+                        alt={album.title}
+                        className="h-full w-full object-cover rounded-xl"
+                        style={{
+                          transform: isHovered ? "scale(1.04) translateY(-6px)" : "scale(1)",
+                          transition: "transform 220ms ease",
                         }}
-                        className="text-lg hover:scale-105 transition"
+                      />
+
+                      <div
+                        className="absolute inset-0 flex items-center justify-center rounded-t-xl"
+                        style={{
+                          opacity: isHovered ? 1 : 0,
+                          transition: "opacity 80ms ease-out",
+                          pointerEvents: isHovered ? "auto" : "none",
+                        }}
                       >
-                        {album.is_favorite ? "❤️" : "🤍"}
-                      </button>
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.35))",
+                            backdropFilter: "blur(6px)",
+                          }}
+                        />
 
-                      <span className="text-xs text-gray-300">{album.favorites_count}</span>
+                        <motion.div
+                          className="relative z-10 w-full px-3 pointer-events-auto"
+                          initial="hidden"
+                          animate={isHovered ? "visible" : "hidden"}
+                          variants={overlayVariants}
+                          transition={{ duration: 0.18, ease: "easeOut" }}
+                        >
+                          <div className="grid grid-cols-10 gap-1.5 w-full">
+                            {Array.from({ length: 10 }).map((_, idx) => {
+                              const value = idx + 1;
+                              const active = album.user_rating === value;
+                              const highlight =
+                                hoveredRatingValue !== null &&
+                                hoveredRatingAlbum === album.id &&
+                                value <= hoveredRatingValue;
+
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onMouseEnter={() => handleRatingHover(value)}
+                                  onMouseLeave={() => handleRatingHover(null)}
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleRatingClick(album.id, value);
+                                  }}
+                                  style={{
+                                    ...buttonStyle,
+                                    position: "relative",
+                                    background: active
+                                      ? RATING_COLORS[value]
+                                      : highlight
+                                      ? RATING_COLORS[value] + "33"
+                                      : "rgba(255,255,255,0.08)",
+                                    border: active
+                                      ? `2px solid ${RATING_COLORS[value]}`
+                                      : highlight
+                                      ? `2px solid ${RATING_COLORS[value]}88`
+                                      : "1px solid rgba(255,255,255,0.2)",
+                                    transform: active
+                                      ? "scale(1.2)"
+                                      : highlight
+                                      ? "scale(1.1)"
+                                      : "scale(1)",
+                                    boxShadow: active
+                                      ? `0 0 12px ${RATING_COLORS[value]}, 0 0 20px ${RATING_COLORS[value]}55`
+                                      : highlight
+                                      ? `0 0 10px ${RATING_COLORS[value]}44`
+                                      : "none",
+                                    transition:
+                                      "transform 90ms ease, background 100ms ease, border 120ms ease, box-shadow 120ms ease",
+                                  }}
+                                  className="rating-circle aspect-square rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
+                                >
+                                  {value}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+
+                    {/* INFO PANEL */}
+                    <div className="p-3">
+                      <p className="font-semibold text-sm line-clamp-2" style={{ color: "#f8fbff" }}>
+                        {album.title}
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: "#9fb6d6" }}>
+                        {album.artist_name}
+                      </p>
+
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-yellow-400">
+                          <span style={{ filter: "drop-shadow(0 4px 8px rgba(255,200,0,0.08))" }}>⭐</span>
+                          <span style={{ color: "#ffeaa7", fontWeight: 700 }}>
+                            {album.avg_rating ?? "—"}
+                          </span>
+                          <span className="text-xs" style={{ color: "#9fb6d6" }}>
+                            ({album.votes} głosów)
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleFavorite(album.id, album.is_favorite);
+                            }}
+                            className="text-lg"
+                            style={{
+                              transform: "translateZ(0)",
+                              textShadow: album.is_favorite
+                                ? `0 4px 20px ${NEON.magenta}66`
+                                : undefined,
+                            }}
+                          >
+                            {album.is_favorite ? "❤️" : "🤍"}
+                          </button>
+
+                          <span className="text-xs" style={{ color: "#9fb6d6" }}>
+                            {album.favorites_count}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* arrows - pokazuj tylko jeśli jest więcej albumów niż visibleCount */}
+            {top10.length > visibleCount && (
+              <>
+                <button
+                  onClick={goPrev}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full z-40 hover:scale-110 transition-transform"
+                  style={{
+                    background: "linear-gradient(90deg, rgba(255,0,255,0.06), rgba(0,234,255,0.04))",
+                    border: "1px solid rgba(255,255,255,0.03)",
+                    boxShadow: "0 8px 30px rgba(0,0,0,0.6)",
+                    color: "#dff9ff",
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>❮</span>
+                </button>
+
+                <button
+                  onClick={goNext}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full z-40 hover:scale-110 transition-transform"
+                  style={{
+                    background: "linear-gradient(90deg, rgba(0,234,255,0.04), rgba(255,0,255,0.04))",
+                    border: "1px solid rgba(255,255,255,0.03)",
+                    boxShadow: "0 8px 30px rgba(0,0,0,0.6)",
+                    color: "#dff9ff",
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>❯</span>
+                </button>
+              </>
+            )}
+
+            {/* dots - pokazuj tylko jeśli jest więcej niż 1 slajd */}
+            {top10.length > visibleCount && (
+              <div className="absolute bottom-2 w-full flex justify-center gap-2">
+                {Array.from({
+                  length: Math.max(1, Math.max(0, top10.length - visibleCount + 1)),
+                }).map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => goToDot(idx)}
+                    className={`w-3 h-3 rounded-full transition ${idx === slideIndex ? "scale-110" : ""}`}
+                    style={{
+                      background: idx === slideIndex ? NEON.blue : "rgba(255,255,255,0.06)",
+                      boxShadow:
+                        idx === slideIndex ? `0 6px 18px ${NEON.blue}55` : undefined,
+                    }}
+                  />
+                ))}
               </div>
-            ))}
+            )}
           </div>
-
-          {/* Slider arrows */}
-          <button
-            onClick={goPrev}
-            className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/40 text-white p-2 rounded-full z-40"
-          >
-            ❮
-          </button>
-          <button
-            onClick={goNext}
-            className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/40 text-white p-2 rounded-full z-40"
-          >
-            ❯
-          </button>
-
-          {/* Slider dots */}
-          <div className="absolute bottom-2 w-full flex justify-center gap-2">
-            {Array.from({
-              length: Math.max(1, Math.max(0, top10.length - visibleCount + 1)),
-            }).map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => goToDot(idx)}
-                className={`w-3 h-3 rounded-full transition ${
-                  idx === slideIndex ? "bg-yellow-400 scale-110" : "bg-gray-500"
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* FILTERS */}
-        <div className="bg-white dark:bg-[#1a1f25] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 mb-10 shadow-lg mt-14">
-          <div className="flex flex-wrap gap-3 mb-4">
-
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="🔎 Szukaj albumu..."
-              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-[#111418] flex-1"
-            />
-
-            <select
-              value={artistFilter}
-              onChange={e => setArtistFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg border bg-gray-50 dark:bg-[#111418]"
-            >
-              <option value="">🎤 Wszyscy artyści</option>
-              {artists.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-
-            <select
-              value={ratingMin === "" ? "" : String(ratingMin)}
-              onChange={e => {
-                const v = e.target.value;
-                setRatingMin(v === "" ? "" : Number(v));
-              }}
-              className="px-3 py-2 rounded-lg border bg-gray-50 dark:bg-[#111418]"
-            >
-              <option value="">⭐ Minimalna ocena</option>
-              {[...Array(10)].map((_, i) => (
-                <option key={i} value={i + 1}>{i + 1}/10</option>
-              ))}
-            </select>
-
-            <select
-              value={sortBy}
-              onChange={e => setSortBy(e.target.value)}
-              className="px-3 py-2 rounded-lg border bg-gray-50 dark:bg-[#111418]"
-            >
-              <option value="title">🔠 Tytuł</option>
-              <option value="year">📅 Rok</option>
-              <option value="rating">⭐ Ocena</option>
-              <option value="popularity">🔥 Popularność</option>
-            </select>
-
-            <button
-              onClick={() => {
-                setSearch("");
-                setArtistFilter("");
-                setGenreFilter("");
-                setSortBy("title");
-                setRatingMin("");
-              }}
-              className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-[#252b33]"
-              type="button"
-            >
-              ✖ Wyczyść
-            </button>
-          </div>
-        </div>
+        </section>
 
         {/* GRID */}
-        {albums.length > 0 ? (
-          <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {albums.map(album => (
-              <div
-                key={album.id}
-                className="relative bg-[#171b20] rounded-xl overflow-visible shadow-md"
-              >
-                {/* COVER */}
-                <div
-                  className="relative h-52 w-full"
-                  onMouseEnter={() => handleMouseEnter(album.id)}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  <img
-                    src={album.cover_url}
-                    alt={album.title}
-                    className="h-full w-full object-cover rounded-t-xl"
-                  />
+        <section className="mb-12">
+          {albums.length > 0 ? (
+            <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {albums.map(album => {
+                const isHovered = hoveredRatingAlbum === album.id;
 
-                  {/* OVERLAY */}
+                return (
                   <div
-                    className="absolute inset-0 flex items-center justify-center rounded-t-xl"
+                    key={album.id}
+                    className="relative rounded-xl overflow-visible cursor-pointer"
                     style={{
-                      opacity: hoveredRatingAlbum === album.id ? 1 : 0,
-                      transition: "opacity 150ms ease",
-                      pointerEvents: hoveredRatingAlbum === album.id ? "auto" : "none",
+                      background: "linear-gradient(180deg, rgba(10,12,18,0.85), rgba(8,10,14,0.7))",
+                      border: "1px solid rgba(255,255,255,0.02)",
+                      ...(isHovered
+                        ? neonGlowStyle(NEON.magenta)
+                        : { boxShadow: "0 8px 18px rgba(0,0,0,0.6)" }),
+                      transition: "box-shadow 160ms ease, transform 160ms ease",
+                      transform: isHovered ? "translateY(-6px)" : "translateY(0)",
                     }}
+                    onClick={() => router.push(`/album/${album.id}`)}
+                    onMouseEnter={() => handleMouseEnter(album.id)}
+                    onMouseLeave={handleMouseLeave}
                   >
-                    <div
-                      className="absolute inset-0 rounded-t-xl pointer-events-none"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.4), rgba(0,0,0,0.6))",
-                      }}
-                    />
 
-                    <motion.div
-                      className="relative z-10 w-full px-3"
-                      initial="hidden"
-                      animate={hoveredRatingAlbum === album.id ? "visible" : "hidden"}
-                      variants={overlayVariants}
-                      transition={{ duration: 0.18, ease: "easeOut" }}
-                    >
-                      <div className="grid grid-cols-10 gap-[2px] w-full">
-                        {Array.from({ length: 10 }).map((_, i) => {
-                          const value = i + 1;
-                          const active = album.user_rating === value;
+                    {/* COVER */}
+                    <div className="relative h-52 w-full rounded-xl overflow-hidden">
+                      <img
+                        src={album.cover_url}
+                        alt={album.title}
+                        className="h-full w-full object-cover rounded-t-xl"
+                      />
 
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={e => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleRatingClick(album.id, value);
-                              }}
-                              style={buttonStyle}
-                              className={`aspect-square rounded-full flex items-center justify-center text-[10px] font-bold transition 
-                                ${
-                                  active
-                                    ? "bg-yellow-400 text-black scale-110"
-                                    : "bg-gray-700 text-white hover:bg-yellow-300 hover:text-black hover:scale-110"
-                                }`}
-                            >
-                              {value}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  </div>
-                </div>
-
-                {/* PANEL */}
-                <div
-                  className="p-4 text-center bg-white/10 backdrop-blur-md cursor-pointer rounded-b-xl"
-                  onClick={() => router.push(`/album/${album.id}`)}
-                >
-                  <h3 className="font-semibold text-sm text-white line-clamp-2 mb-1">
-                    {album.title}
-                  </h3>
-
-                  <p className="text-xs text-gray-400 mb-2">{album.artist_name}</p>
-
-                  <div className="mt-3 flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 text-yellow-500">
-                      ⭐ {album.avg_rating ?? "—"}
-                      <span className="text-xs text-gray-300">({album.votes} głosów)</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleFavorite(album.id, album.is_favorite);
+                      {/* RATING OVERLAY */}
+                      <div
+                        className="absolute inset-0 flex items-center justify-center rounded-t-xl"
+                        style={{
+                          opacity: isHovered ? 1 : 0,
+                          transition: "opacity 80ms ease-out",
+                          pointerEvents: isHovered ? "auto" : "none",
                         }}
-                        className="text-lg hover:scale-105 transition"
                       >
-                        {album.is_favorite ? "❤️" : "🤍"}
-                      </button>
+                        <div
+                          className="absolute inset-0 rounded-t-xl pointer-events-none"
+                          style={{
+                            background: "linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.35))",
+                            backdropFilter: "blur(4px)",
+                          }}
+                        />
 
-                      <span className="text-xs text-gray-300">{album.favorites_count}</span>
+                        <motion.div
+                          className="relative z-10 w-full px-3 pointer-events-auto"
+                          initial="hidden"
+                          animate={isHovered ? "visible" : "hidden"}
+                          variants={overlayVariants}
+                          transition={{ duration: 0.16 }}
+                        >
+                          <div className="grid grid-cols-10 gap-1.5 w-full">
+                            {Array.from({ length: 10 }).map((_, idx) => {
+                              const value = idx + 1;
+                              const active = album.user_rating === value;
+                              const highlight =
+                                hoveredRatingValue !== null &&
+                                hoveredRatingAlbum === album.id &&
+                                value <= hoveredRatingValue;
+
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onMouseEnter={() => handleRatingHover(value)}
+                                  onMouseLeave={() => handleRatingHover(null)}
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleRatingClick(album.id, value);
+                                  }}
+                                  style={{
+                                    ...buttonStyle,
+                                    position: "relative",
+                                    background: active
+                                      ? RATING_COLORS[value]
+                                      : highlight
+                                      ? RATING_COLORS[value] + "33"
+                                      : "rgba(255,255,255,0.08)",
+                                    border: active
+                                      ? `2px solid ${RATING_COLORS[value]}`
+                                      : highlight
+                                      ? `2px solid ${RATING_COLORS[value]}88`
+                                      : "1px solid rgba(255,255,255,0.2)",
+                                    transform: active
+                                      ? "scale(1.2)"
+                                      : highlight
+                                      ? "scale(1.1)"
+                                      : "scale(1)",
+                                    boxShadow: active
+                                      ? `0 0 12px ${RATING_COLORS[value]}, 0 0 20px ${RATING_COLORS[value]}55`
+                                      : highlight
+                                      ? `0 0 10px ${RATING_COLORS[value]}44`
+                                      : "none",
+                                    transition:
+                                      "transform 90ms ease, background 100ms ease, border 120ms ease, box-shadow 120ms ease",
+                                  }}
+                                  className="rating-circle aspect-square rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
+                                >
+                                  {value}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      </div>
+                    </div>
+
+                    {/* INFO PANEL */}
+                    <div className="p-4 text-center rounded-b-xl h-[165px] flex flex-col justify-between">
+
+                      {/* TITLE */}
+                      <h3
+                        className="font-semibold text-sm line-clamp-2 mb-1"
+                        style={{ color: "#f8fbff" }}
+                      >
+                        {album.title}
+                      </h3>
+
+                      {/* ARTIST */}
+                      <p className="text-xs text-[#9fb6d6] mb-2">{album.artist_name}</p>
+
+                      {/* GENRE TAGS */}
+                      {album.genre && (
+                        <GenreTags genre={album.genre} collapseSignal={!isHovered} />
+                      )}
+
+                      {/* BOTTOM PANEL */}
+                      <div className="mt-3 flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 text-yellow-400">
+                          <span style={{ color: "#ffeaa7", fontWeight: 700 }}>
+                            {album.avg_rating ?? "—"}
+                          </span>
+                          <span className="text-xs" style={{ color: "#9fb6d6" }}>
+                            ({album.votes} głosów)
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleFavorite(album.id, album.is_favorite);
+                            }}
+                            className="text-lg"
+                            style={{
+                              textShadow: album.is_favorite
+                                ? `0 4px 20px ${NEON.magenta}66`
+                                : undefined,
+                            }}
+                          >
+                            {album.is_favorite ? "❤️" : "🤍"}
+                          </button>
+
+                          <span className="text-xs" style={{ color: "#9fb6d6" }}>
+                            {album.favorites_count}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="py-24 text-center text-gray-500">Brak albumów</div>
-        )}
+                );
+              })}
+            </div>
+          ) : (
+            <div className="py-24 text-center text-gray-400">Brak albumów</div>
+          )}
+        </section>
 
         {/* PAGINATION */}
         {total && total > limit && (
@@ -793,25 +1075,34 @@ export default function HomePage() {
             <button
               disabled={page === 1}
               onClick={() => setPage(p => Math.max(1, p - 1))}
-              className="px-3 py-2 border rounded-md"
-              type="button"
+              className="px-3 py-2 rounded-md"
+              style={{
+                background: "linear-gradient(90deg, rgba(255,0,255,0.02), rgba(0,234,255,0.02))",
+                border: "1px solid rgba(255,255,255,0.03)",
+                color: "#dff6ff",
+              }}
             >
               ← Poprzednia
             </button>
 
-            <span>Strona {page}</span>
+            <span style={{ color: "#cfeaff", alignSelf: "center" }}>
+              Strona {page}
+            </span>
 
             <button
               disabled={page >= Math.ceil(total / limit)}
               onClick={() => setPage(p => p + 1)}
-              className="px-3 py-2 border rounded-md"
-              type="button"
+              className="px-3 py-2 rounded-md"
+              style={{
+                background: "linear-gradient(90deg, rgba(0,234,255,0.02), rgba(255,0,255,0.02))",
+                border: "1px solid rgba(255,255,255,0.03)",
+                color: "#dff6ff",
+              }}
             >
               Następna →
             </button>
           </div>
         )}
-
       </div>
     </main>
   );

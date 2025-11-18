@@ -130,18 +130,61 @@ const fetchAlbum = useCallback(
         return;
       }
 
+      // --- ARTIST NAME ---
       const artistName =
-        albumData.artist_name ??
-        albumData.artists?.name ??
+        albumData.artist_name ||
+        (Array.isArray(albumData.artists)
+          ? albumData.artists[0]?.name
+          : albumData.artists?.name) ||
         null;
 
       setAlbum(albumData);
 
-      // 🔥 ZADBAJ O SPOTIFY ID
+      // ---------------------------
+      // 🔥 1) WYKRYWANIE SPOTIFY ID Z OPISU
+      // ---------------------------
+      function extractSpotifyAlbumId(url?: string | null) {
+        if (!url) return null;
+        const match = url.match(/open\.spotify\.com\/album\/([A-Za-z0-9]+)/);
+        return match ? match[1] : null;
+      }
+
       let spotifyId = albumData.spotify_id ?? null;
+
+      // jeśli spotify_id nie ma, ale opis jest linkiem do Spotify → wyciągamy ID
+      if (!spotifyId && typeof albumData.description === "string") {
+        const extracted = extractSpotifyAlbumId(albumData.description);
+        if (extracted) {
+          console.log("🎉 Wykryto Spotify ID z opisu:", extracted);
+          spotifyId = extracted;
+
+          try {
+            await supabase
+              .from("albums")
+              .update({ spotify_id: extracted })
+              .eq("id", albumData.id);
+          } catch (e) {
+            console.warn("Nie udało się zapisać spotify_id:", e);
+          }
+
+          setAlbum(prev => ({
+            ...(prev ?? {}),
+            spotify_id: extracted
+          }));
+        }
+      }
+
+      // ---------------------------
+      // 🔥 2) FALLBACK DO WYSZUKIWANIA W SPOTIFY
+      // ---------------------------
       if (!spotifyId && autoFetchTracks && artistName && albumData.title) {
         try {
-          const foundId = await fetchAndSaveSpotifyId(albumData.title, artistName, albumData.id);
+          const foundId = await fetchAndSaveSpotifyId(
+            albumData.title,
+            artistName,
+            albumData.id
+          );
+
           if (foundId) {
             spotifyId = foundId;
             setAlbum(prev => ({ ...(prev ?? {}), spotify_id: foundId }));
@@ -151,13 +194,18 @@ const fetchAlbum = useCallback(
         }
       }
 
+      // ---------------------------
+      // 🔥 3) POBIERZ TRACKLISTĘ ZE SPOTIFY
+      // ---------------------------
       if (spotifyId && autoFetchTracks) {
         await fetchSpotifyTracks(spotifyId);
+      } else {
+        setTracks([]); // brak spotify_id → brak tracków
       }
 
-      // ----------------------------------------------
-      // 🔥 LAST.FM OPIS — PRIORYTET
-      // ----------------------------------------------
+      // ---------------------------
+      // 🔥 4) OPIS Z LAST.FM
+      // ---------------------------
 
       const cleanText = (html: string) => {
         if (!html) return "";
@@ -168,12 +216,10 @@ const fetchAlbum = useCallback(
 
         let plain = withBreaks.replace(/<\/?[^>]+>/g, "");
 
-        // usuń fragmenty Last.fm
         plain = plain.replace(/Read more on Last\.fm[\s\S]*$/i, "");
         plain = plain.replace(/User-contributed text[\s\S]*$/i, "");
         plain = plain.replace(/additional terms may apply\.*$/i, "");
 
-        // dekoduj
         plain = plain
           .replace(/&amp;/g, "&")
           .replace(/&lt;/g, "<")
@@ -193,7 +239,6 @@ const fetchAlbum = useCallback(
       let finalOriginal = albumData.description_original || null;
       let finalTranslated = albumData.description || null;
 
-      // 🔥 pobierz Last.fm jeśli brakuje opisu
       if (descriptionMissing && albumData.title && artistName) {
         try {
           const res = await fetch(
@@ -205,11 +250,8 @@ const fetchAlbum = useCallback(
           if (res.ok) {
             const json = await res.json();
 
-            const srcOriginal = json?.description_original ?? "";
-            const srcTranslated = json?.description_translated ?? "";
-
-            const cleanedOriginal = cleanText(srcOriginal);
-            const cleanedTranslated = cleanText(srcTranslated);
+            const cleanedOriginal = cleanText(json?.description_original ?? "");
+            const cleanedTranslated = cleanText(json?.description_translated ?? "");
 
             finalOriginal = cleanedOriginal || null;
             finalTranslated = cleanedTranslated || cleanedOriginal || null;
@@ -219,23 +261,18 @@ const fetchAlbum = useCallback(
         }
       }
 
-      // ----------------------------------------------
-      // 🔥 FALLBACK jeśli dalej brak opisu
-      // ----------------------------------------------
       if (!finalTranslated) finalTranslated = "Brak opisu albumu.";
       if (!finalOriginal) finalOriginal = "Brak oryginalnego opisu.";
 
-      // 🔥 USTAW W UI
       setAlbum(prev => ({
         ...(prev ?? {}),
         description: finalTranslated,
-        description_original: finalOriginal
+        description_original: finalOriginal,
       }));
 
-      // ----------------------------------------------
-      // OCENY / USER / FAVORITES
-      // ----------------------------------------------
-
+      // ---------------------------
+      // 🔥 5) OCENY / ULUBIONE
+      // ---------------------------
       const { data: ratings } = await supabase
         .from("ratings")
         .select("rating")
@@ -250,6 +287,7 @@ const fetchAlbum = useCallback(
 
       const { data: userData } = await supabase.auth.getUser();
       const currentUser = userData?.user ?? null;
+
       setUser(currentUser);
 
       if (currentUser) {
@@ -272,6 +310,13 @@ const fetchAlbum = useCallback(
         setIsFavorite(!!favData);
       }
 
+      // debug
+      console.log("🔥 ALBUM:", albumData);
+      console.log("🔥 artists:", albumData.artists);
+      console.log("🔥 artist_name:", artistName);
+      console.log("🔥 spotify_id:", spotifyId);
+      console.log("🔥 genre:", albumData.genre);
+
     } catch (err) {
       console.error("fetchAlbum error:", err);
       setAlbum(null);
@@ -281,6 +326,7 @@ const fetchAlbum = useCallback(
   },
   [albumId, fetchAndSaveSpotifyId, fetchSpotifyTracks]
 );
+
   useEffect(() => {
     if (!albumId) return;
     fetchAlbum(true);
@@ -496,7 +542,7 @@ const fetchAlbum = useCallback(
           </div>
           </div>
           {/* right */}
-          <div className="bg-white dark:bg-[#1a1f25] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-lg p-6 max-h-[560px] overflow-y-auto">
+          <div  className="bg-white dark:bg-[#1a1f25] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-lg p-6 max-h-[560px] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-300 dark:border-gray-600 pb-2 mb-3">
               <h2 className="text-lg font-semibold">Lista utworów</h2>
               <button onClick={() => setShowTracks(s => !s)} className="text-sm text-blue-500 hover:underline">{showTracks ? "Ukryj" : "Pokaż"}</button>
