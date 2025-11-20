@@ -176,7 +176,42 @@ export default function HomePage() {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+useEffect(() => {
+  const applyTheme = (theme: 'light' | 'dark') => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.background = "#03060a";
+      document.body.style.background = "#03060a";
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.background = "#ffffff";
+      document.body.style.background = "#ffffff";
+    }
+  };
 
+  // Funkcja do sprawdzania i aplikowania motywu
+  const checkAndApplyTheme = () => {
+    const storedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const currentTheme = storedTheme || (prefersDark ? 'dark' : 'light');
+    applyTheme(currentTheme);
+  };
+
+  // Nasłuchuj custom event od Headera
+  const handleThemeChange = (event: CustomEvent) => {
+    applyTheme(event.detail);
+  };
+
+  // Sprawdź motyw przy ładowaniu
+  checkAndApplyTheme();
+
+  // Dodaj event listener
+  window.addEventListener('themeChange', handleThemeChange as EventListener);
+
+  return () => {
+    window.removeEventListener('themeChange', handleThemeChange as EventListener);
+  };
+}, []);
   useEffect(() => {
     const max = Math.max(0, top10.length - visibleCount);
     setSlideIndex(s => Math.min(s, max));
@@ -209,9 +244,6 @@ export default function HomePage() {
     fetchAlbums();
     fetchTop10Albums();
   }, []);
-
-  // USUŃ STARY useEffect DO ODCZYTU Z URL - teraz to robi useFilters
-
   // fetch albums gdy zmienią się filtry
   useEffect(() => {
     fetchAlbums();
@@ -640,13 +672,12 @@ const upsertRating = async (albumId: string | number, value: number) => {
 
   return (
     <main
-      className="pt-24 pb-10 min-h-screen"
-      style={{
-        background:
-          "radial-gradient(1200px 600px at 10% 10%, rgba(138,43,226,0.06), transparent), radial-gradient(1000px 500px at 90% 90%, rgba(0,234,255,0.04), transparent), #03060a",
-        color: "#e6eef8",
-        WebkitFontSmoothing: "antialiased",
-      }}
+className={`pt-24 pb-10 min-h-screen transition-colors duration-300
+  bg-white text-black
+  dark:bg-[#03060a] dark:text-[#e6eef8]
+  dark:bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(138,43,226,0.06),transparent),radial-gradient(1000px_500px_at_90%_90%,rgba(0,234,255,0.04),transparent),#03060a]
+`}
+
     >
       <div className="max-w-7xl mx-auto px-4">
         {/* HEADER */}

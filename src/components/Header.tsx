@@ -1,19 +1,31 @@
 // src/components/Header.tsx
-import { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../lib/supabaseClient";
 import { useRouter } from "next/router";
+import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "../lib/supabaseClient";
 import { useFilters } from "../hooks/useFilters";
 
-export default function Header() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [user, setUser] = useState<any>(null);
-  const [genreOptions, setGenreOptions] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
+/**
+ * Neon palette (used inline for a few accents; main styling uses Tailwind)
+ */
+const NEON = {
+  blue: "#00eaff",
+  magenta: "#ff2dff",
+  purple: "#8a2be2",
+  cyan: "#00ffd5",
+};
 
+export default function Header() {
   const router = useRouter();
-  
-  // UŻYJ HOOKA ZAMIAST LOCAL STATE
+
+  // THEME
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  // USER
+  const [user, setUser] = useState<any>(null);
+
+  // FILTERS HOOK (global URL + state handling)
   const {
     search,
     setSearch,
@@ -26,133 +38,95 @@ export default function Header() {
     ratingMin,
     setRatingMin,
     applyFiltersToURL,
-    clearAllFilters
+    clearAllFilters,
   } = useFilters();
 
-  // Konwertuj genreFilter string na array dla UI
-  const genres = genreFilter ? genreFilter.split(",") : [];
+  // Local UI state
+  const [showFilters, setShowFilters] = useState(false);
 
-  // pobierz listę gatunków z Supabase
+  // Genres from DB
+  const [genreOptions, setGenreOptions] = useState<string[]>([]);
+  const [genreSearch, setGenreSearch] = useState("");
+  const filteredGenres = genreOptions.filter(g =>
+    g.toLowerCase().includes(genreSearch.toLowerCase())
+  );
+
+  // Derived selected genres array
+  const genres = genreFilter ? genreFilter.split(",").map(g => g.trim()).filter(Boolean) : [];
+
+  // SEARCH SUGGESTIONS
+  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const suggestionDebounceRef = useRef<number | null>(null);
+
+  // FILTER PRESETS (persisted to localStorage)
+  const initialPresets = () => {
+    try {
+      const raw = localStorage.getItem("filterPresets");
+      if (!raw) {
+        return [
+          { name: "Rock Classics", genres: ["rock", "classic rock"], years: "1970-1990" },
+          { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2024" },
+        ];
+      }
+      return JSON.parse(raw);
+    } catch {
+      return [
+        { name: "Rock Classics", genres: ["rock", "classic rock"], years: "1970-1990" },
+        { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2024" },
+      ];
+    }
+  };
+  const [filterPresets, setFilterPresets] = useState<Array<{ name: string; genres: string[]; years: string }>>(initialPresets);
+
+  // UI helpers
+  const [showPresetsEditor, setShowPresetsEditor] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [newPresetGenres, setNewPresetGenres] = useState("");
+
+  // Quick stats
+  const hasActiveFilters = genres.length > 0 || !!yearFrom || !!yearTo || ratingMin !== "" || !!search;
+
+  // -----------------------
+  // EFFECTS
+  // -----------------------
+
+  // Load genres from Supabase
   useEffect(() => {
+    let mounted = true;
     async function loadGenres() {
       const { data } = await supabase
         .from("albums")
         .select("genre")
         .not("genre", "is", null);
 
-      const all = new Set<string>();
+      if (!mounted) return;
 
-      (data || []).forEach((a: any) => {
+      const all = new Set<string>();
+      (data || []).forEach((a: any) =>
         a.genre
           ?.split(",")
           .map((g: string) => g.trim())
           .filter(Boolean)
-          .forEach((g: string) => all.add(g));
-      });
+          .forEach((g: string) => all.add(g))
+      );
 
-      setGenreOptions([...all].sort());
+      setGenreOptions([...all].sort((a, b) => a.localeCompare(b)));
     }
 
     loadGenres();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // 🌓 MOTYW DLA CAŁEJ STRONY
+  // Supabase auth session
   useEffect(() => {
-    const storedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const themeToSet = storedTheme || (prefersDark ? "dark" : "light");
-    setTheme(themeToSet);
-    
-    if (themeToSet === "dark") {
-      document.documentElement.classList.add("dark");
-      document.documentElement.style.background = "#03060a";
-      document.body.style.background = "#03060a";
-    } else {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.style.background = "#ffffff";
-      document.body.style.background = "#ffffff";
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-    setTheme(newTheme);
-    localStorage.setItem("theme", newTheme);
-    
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-      document.documentElement.style.background = "#03060a";
-      document.body.style.background = "#03060a";
-    } else {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.style.background = "#ffffff";
-      document.body.style.background = "#ffffff";
-    }
-  };
-
-  // Obsługa Enter w wyszukiwarce
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      applyFiltersToURL();
-    }
-  };
-
-  // Zastosuj filtry (dla przycisku wyszukiwania)
-  const applyFilters = () => {
-    applyFiltersToURL();
-  };
-
-  // Wyczyść tylko wyszukiwanie
-  const clearSearch = () => {
-    setSearch("");
-    
-    const query = { ...router.query };
-    delete query.q;
-    
-    if (Object.keys(query).length === 0) {
-      router.push("/", undefined, { shallow: true });
-    } else {
-      router.push({ pathname: "/", query }, undefined, { shallow: true });
-    }
-  };
-
-  // Zmiana gatunków
-  const handleGenreToggle = (g: string) => {
-    const newGenres = genres.includes(g) 
-      ? genres.filter(x => x !== g) 
-      : [...genres, g];
-    setGenreFilter(newGenres.join(","));
-  };
-
-  // Zmiana roku
-  const handleYearChange = (field: 'from' | 'to', value: string) => {
-    if (field === 'from') {
-      setYearFrom(value);
-    } else {
-      setYearTo(value);
-    }
-  };
-
-  // Zmiana oceny
-  const handleRatingChange = (value: string) => {
-    setRatingMin(value);
-  };
-
-  // Zastosuj wszystkie zmiany filtrow
-  const applyAllFilters = () => {
-    applyFiltersToURL();
-  };
-
-  // Kliknięcie w logo
-  const handleLogoClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    clearAllFilters();
-  };
-
-  // 🔐 user
-  useEffect(() => {
+    let mounted = true;
     const getSession = async () => {
       const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
       setUser(data.session?.user ?? null);
     };
     getSession();
@@ -161,9 +135,191 @@ export default function Header() {
       setUser(session?.user ?? null);
     });
 
-    return () => subscription.subscription.unsubscribe();
+    return () => {
+      subscription.subscription.unsubscribe();
+      mounted = false;
+    };
   }, []);
 
+  // THEME: load from localStorage + apply to document
+  useEffect(() => {
+    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
+    const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const t: "light" | "dark" = stored || (prefersDark ? "dark" : "light");
+    setTheme(t);
+    applyThemeToDoc(t);
+  }, []);
+
+  const applyThemeToDoc = (t: "light" | "dark") => {
+    if (t === "dark") {
+      document.documentElement.classList.add("dark");
+      document.documentElement.style.background = "#03060a";
+      document.body.style.background = "#03060a";
+    } else {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.style.background = "#ffffff";
+      document.body.style.background = "#ffffff";
+    }
+  };
+
+  const toggleTheme = () => {
+    const newTheme = theme === "dark" ? "light" : "dark";
+    setTheme(newTheme);
+    localStorage.setItem("theme", newTheme);
+    applyThemeToDoc(newTheme);
+    window.dispatchEvent(new CustomEvent("themeChange", { detail: newTheme }));
+  };
+
+  // -----------------------
+  // SEARCH SUGGESTIONS (debounced)
+  // -----------------------
+  const fetchSearchSuggestions = async (q: string) => {
+    try {
+      if (!q || q.trim().length < 2) {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+      const { data } = await supabase
+        .from("albums")
+        .select("title")
+        .ilike("title", `%${q}%`)
+        .limit(5);
+
+      if (data) {
+        setSearchSuggestions(Array.from(new Set(data.map((d: any) => d.title))));
+        setShowSuggestions(true);
+      }
+    } catch (err) {
+      console.error("fetchSearchSuggestions:", err);
+    }
+  };
+
+  // call debounced
+  const handleSearchInputChange = (value: string) => {
+    setSearch(value);
+
+    // debounce
+    if (suggestionDebounceRef.current) {
+      window.clearTimeout(suggestionDebounceRef.current);
+    }
+    suggestionDebounceRef.current = window.setTimeout(() => {
+      fetchSearchSuggestions(value);
+      suggestionDebounceRef.current = null;
+    }, 280);
+  };
+
+  // click outside suggestions to close
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!suggestionsRef.current) return;
+      if (!suggestionsRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  const handleSuggestionSelect = (title: string) => {
+    setSearch(title);
+    setShowSuggestions(false);
+    // apply immediately
+    applyFiltersToURL();
+  };
+
+  // -----------------------
+  // FILTER PRESETS MANAGEMENT
+  // -----------------------
+  useEffect(() => {
+    try {
+      localStorage.setItem("filterPresets", JSON.stringify(filterPresets));
+    } catch (e) {
+      // ignore
+    }
+  }, [filterPresets]);
+
+  const applyPreset = (preset: { name: string; genres: string[]; years: string }) => {
+    setGenreFilter(preset.genres.join(","));
+    const [from, to] = preset.years.split("-");
+    setYearFrom(from ?? "");
+    setYearTo(to ?? "");
+    // apply to URL
+    applyFiltersToURL();
+    setShowFilters(false);
+  };
+
+  const saveCurrentAsPreset = () => {
+    const name = newPresetName.trim() || `Preset ${filterPresets.length + 1}`;
+    const preset = {
+      name,
+      genres: genres,
+      years: `${yearFrom || ""}-${yearTo || ""}`,
+    };
+    setFilterPresets(p => [preset, ...p].slice(0, 12)); // keep up to 12
+    setNewPresetName("");
+    setShowPresetsEditor(false);
+  };
+
+  const deletePreset = (idx: number) => {
+    setFilterPresets(p => p.filter((_, i) => i !== idx));
+  };
+
+  // -----------------------
+  // Quick Filters
+  // -----------------------
+  const applyQuickNewReleases = () => {
+    setYearFrom("2020");
+    setYearTo("2024");
+    applyFiltersToURL();
+  };
+
+  const applyQuickTopRatings = () => {
+    setRatingMin("8");
+    applyFiltersToURL();
+  };
+
+  // -----------------------
+  // Genre toggle
+  // -----------------------
+  const handleGenreToggle = (g: string) => {
+    const newGenres = genres.includes(g) ? genres.filter(x => x !== g) : [...genres, g];
+    setGenreFilter(newGenres.join(","));
+  };
+
+  // -----------------------
+  // Clear search only
+  // -----------------------
+  const clearSearch = () => {
+    setSearch("");
+    setSearchSuggestions([]);
+    setShowSuggestions(false);
+
+    // update URL via hook
+    // applyFiltersToURL will read search state from hook when called elsewhere (or we can call it)
+    // To remove just `q` from URL use router shallow
+    const q = { ...router.query };
+    delete q.q;
+    if (Object.keys(q).length === 0) {
+      router.push("/", undefined, { shallow: true });
+    } else {
+      router.push({ pathname: "/", query: q }, undefined, { shallow: true });
+    }
+  };
+
+  // handle enter in search
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      applyFiltersToURL();
+      setShowSuggestions(false);
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+    }
+  };
+
+  // -----------------------
+  // Auth button
+  // -----------------------
   const handleAuth = async () => {
     if (user) {
       await supabase.auth.signOut();
@@ -174,225 +330,451 @@ export default function Header() {
     }
   };
 
-  const hasActiveFilters = genres.length > 0 || yearFrom || yearTo || ratingMin !== "" || search;
+  // -----------------------
+  // Small helper UI pieces
+  // -----------------------
+  const HeaderButton = ({ children, onClick, className = "" }: any) => (
+    <button onClick={onClick} className={`px-3 py-2 rounded-lg transition ${className}`}>
+      {children}
+    </button>
+  );
 
+  // -----------------------
+  // JSX
+  // -----------------------
   return (
-    <header className="fixed top-0 left-0 w-full bg-white dark:bg-[#14181f] border-b border-gray-200 dark:border-gray-700 shadow-sm z-50 transition-colors duration-300">
-      <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-3">
-        {/* LOGO */}
-        <a 
-          href="/" 
-          onClick={handleLogoClick}
-          className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
-        >
-          <span className="text-2xl">🎵</span>
-          <span>AlbumApp</span>
-        </a>
-
-        {/* 🔍 WYSZUKIWARKA */}
-        <div className="flex items-center gap-3 flex-1 max-w-xl mx-6">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              placeholder="Szukaj albumów..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1a1f25] text-gray-800 dark:text-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            />
-            {search && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-12 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+    <header className="fixed top-0 left-0 w-full z-50">
+      <div className="bg-white dark:bg-[#0b0f14] border-b border-gray-200 dark:border-gray-800 shadow-sm transition-colors duration-300">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* LOGO */}
+            <div className="flex items-center gap-3">
+              <a
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  // clear all filters when clicking logo (as in original)
+                  clearAllFilters();
+                  router.push("/");
+                }}
+                className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white hover:opacity-90 transition"
               >
-                ✕
-              </button>
-            )}
-            <button
-              onClick={applyFilters}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 p-1 transition-colors"
-              title="Szukaj"
-            >
-              🔍
-            </button>
-          </div>
+                <span className="text-2xl">🎵</span>
+                <span>AlbumApp</span>
+              </a>
 
-          <button
-            onClick={() => setShowFilters(s => !s)}
-            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all flex items-center gap-2 ${
-              showFilters 
-                ? "bg-blue-500 text-white border-blue-500" 
-                : hasActiveFilters
-                ? "bg-orange-100 border-orange-300 text-orange-700 dark:bg-orange-900 dark:border-orange-700 dark:text-orange-300"
-                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1a1f25] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#1e232b]"
-            }`}
-          >
-            <span>⚙</span>
-            <span>Filtry</span>
-            {hasActiveFilters && (
-              <span className="bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                !
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* NAV */}
-        <nav className="flex items-center gap-4 text-gray-700 dark:text-gray-300 text-sm">
-          <Link 
-            href="/favorites" 
-            className="hover:text-blue-500 dark:hover:text-blue-400 transition px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1e232b]"
-          >
-            Ulubione
-          </Link>
-
-          <Link 
-            href="/profile" 
-            className="hover:text-blue-500 dark:hover:text-blue-400 transition px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1e232b]"
-          >
-            Profil
-          </Link>
-
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-[#1e232b] transition"
-            aria-label="Toggle theme"
-          >
-            {theme === "dark" ? "🌞" : "🌙"}
-          </button>
-
-          <button
-            onClick={handleAuth}
-            className={`px-4 py-2 rounded-lg text-white font-medium transition ${
-              user ? "bg-red-500 hover:bg-red-600" : "bg-blue-500 hover:bg-blue-600"
-            }`}
-          >
-            {user ? "Wyloguj" : "Zaloguj"}
-          </button>
-        </nav>
-      </div>
-
-      {/* PANEL FILTRÓW */}
-      {showFilters && (
-        <div className="w-full bg-white dark:bg-[#1a1f25] border-t border-gray-200 dark:border-gray-700 shadow-lg py-6 px-6">
-          <div className="max-w-7xl mx-auto">
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              
-              {/* Gatunki */}
-              <div className="lg:col-span-2">
-                <p className="font-semibold mb-3 text-sm text-gray-700 dark:text-gray-300">
-                  Gatunki {genres.length > 0 && `(${genres.length} wybranych)`}
-                </p>
-                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
-                  {genreOptions.map((g: string) => (
-                    <button
-                      key={g}
-                      onClick={() => handleGenreToggle(g)}
-                      className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
-                        genres.includes(g)
-                          ? "bg-blue-500 text-white border-blue-600 shadow-sm"
-                          : "bg-gray-100 dark:bg-[#111418] text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-[#1a1f25]"
-                      }`}
-                    >
-                      {g}
-                    </button>
-                  ))}
-                </div>
+              {/* small quick info (only on wide screens) */}
+              <div className="hidden md:flex items-center text-xs text-gray-500 dark:text-gray-400 ml-3">
+                <span className="mr-3">Twoja kolekcja</span>
+                <span className="px-2 py-1 rounded-full text-[11px]" style={{ background: "rgba(0,234,255,0.06)", color: NEON.blue }}>
+                  neon
+                </span>
               </div>
+            </div>
 
-              {/* Rok */}
-              <div>
-                <p className="font-semibold mb-3 text-sm text-gray-700 dark:text-gray-300">
-                  Rok wydania
-                </p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Od</label>
-                    <input
-                      type="number"
-                      placeholder="1950"
-                      value={yearFrom}
-                      onChange={e => handleYearChange('from', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#111418] text-gray-800 dark:text-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Do</label>
-                    <input
-                      type="number"
-                      placeholder="2025"
-                      value={yearTo}
-                      onChange={e => handleYearChange('to', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#111418] text-gray-800 dark:text-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Ocena */}
-              <div>
-                <p className="font-semibold mb-3 text-sm text-gray-700 dark:text-gray-300">
-                  Minimalna ocena
-                </p>
+            {/* SEARCH + FILTERS */}
+            <div className="flex-1 flex items-center justify-center px-4">
+              <div className="w-full max-w-2xl relative">
+                {/* Search input */}
                 <div className="flex items-center gap-3">
                   <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    placeholder="0"
-                    value={ratingMin}
-                    onChange={e => handleRatingChange(e.target.value)}
-                    className="w-20 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#111418] text-gray-800 dark:text-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
+                    type="text"
+                    placeholder="Szukaj albumów..."
+                    value={search}
+                    onChange={(e) => handleSearchInputChange(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    onFocus={() => { if (searchSuggestions.length > 0) setShowSuggestions(true); }}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                    aria-label="Szukaj albumów"
                   />
-                  <span className="text-gray-500 dark:text-gray-400 text-sm">/ 10</span>
+
+                  {/* clear */}
+                  {search && (
+                    <button
+                      onClick={clearSearch}
+                      className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-[#121617] transition"
+                      title="Wyczyść"
+                    >
+                      ✕
+                    </button>
+                  )}
+
+                  {/* apply */}
+                  <button
+                    onClick={() => { applyFiltersToURL(); setShowSuggestions(false); }}
+                    className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-[#121617] transition"
+                    title="Szukaj"
+                  >
+                    🔍
+                  </button>
+
+                  {/* Filters button */}
+                  <button
+                    onClick={() => setShowFilters(s => !s)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${
+                      showFilters ? "bg-blue-500 text-white border-blue-500" : hasActiveFilters
+                        ? "bg-orange-100 border-orange-300 text-orange-700 dark:bg-orange-900 dark:border-orange-700 dark:text-orange-300"
+                        : "border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#121617]"
+                    }`}
+                    aria-expanded={showFilters}
+                    aria-controls="filters-panel"
+                  >
+                    <span>⚙</span>
+                    <span className="hidden sm:inline">Filtry</span>
+
+                    {hasActiveFilters && (
+                      <div className="flex gap-1 items-center ml-2">
+                        {search && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: NEON.blue, color: "#001" }}>🔍</span>}
+                        {genres.length > 0 && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.purple, color: "#001" }}>{genres.length}</span>}
+                        {(yearFrom || yearTo) && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.cyan, color: "#001" }}>📅</span>}
+                        {ratingMin && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: "#ffca28", color: "#001" }}>⭐</span>}
+                      </div>
+                    )}
+                  </button>
+                </div>
+
+                {/* Suggestions dropdown */}
+                <div ref={suggestionsRef} className="absolute left-0 right-0 mt-2 z-40">
+                  <AnimatePresence>
+                    {showSuggestions && searchSuggestions.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        className="bg-white dark:bg-[#0b0f14] border border-gray-200 dark:border-gray-800 rounded-lg shadow-lg overflow-hidden"
+                      >
+                        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                          {searchSuggestions.map((sug, i) => (
+                            <li key={i}>
+                              <button
+                                onClick={() => handleSuggestionSelect(sug)}
+                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-[#0f1418] transition"
+                              >
+                                {sug}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
             </div>
 
-            {/* AKCJE FILTRÓW */}
-            <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <div className="text-sm text-gray-500 dark:text-gray-400">
-                {hasActiveFilters ? (
-                  <span>Aktywne filtry: {[
-                    search && `szukaj: "${search}"`,
-                    genres.length > 0 && `${genres.length} gatunków`,
-                    yearFrom && `od ${yearFrom}`,
-                    yearTo && `do ${yearTo}`,
-                    ratingMin && `ocena ≥ ${ratingMin}`
-                  ].filter(Boolean).join(', ')}</span>
-                ) : (
-                  <span>Brak aktywnych filtrów</span>
-                )}
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={applyAllFilters}
-                  className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition"
-                >
-                  Zastosuj filtry
-                </button>
+            {/* NAV ACTIONS */}
+            <nav className="flex items-center gap-3">
+              <Link href="/favorites" className="hidden sm:inline px-3 py-2 rounded-md text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#121617] transition">Ulubione</Link>
+              <Link href="/profile" className="hidden sm:inline px-3 py-2 rounded-md text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#121617] transition">Profil</Link>
 
-                {hasActiveFilters && (
-                  <button
-                    onClick={clearAllFilters}
-                    className="px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900 hover:bg-red-100 dark:hover:bg-red-800 transition text-sm font-medium"
-                  >
-                    Wyczyść wszystkie
-                  </button>
-                )}
-                
-                <button
-                  onClick={() => setShowFilters(false)}
-                  className="px-4 py-2 rounded-lg bg-gray-500 hover:bg-gray-600 text-white text-sm font-medium transition"
-                >
-                  Zamknij
-                </button>
-              </div>
-            </div>
+              {/* Theme toggle */}
+              <button onClick={toggleTheme} aria-label="Toggle theme" className="p-2 rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-[#121617] transition">
+                {theme === "dark" ? "🌞" : "🌙"}
+              </button>
+
+              {/* Auth */}
+              <button
+                onClick={handleAuth}
+                className={`px-4 py-2 rounded-lg text-white font-medium transition ${user ? "bg-red-500 hover:bg-red-600" : "bg-blue-500 hover:bg-blue-600"}`}
+              >
+                {user ? "Wyloguj" : "Zaloguj"}
+              </button>
+            </nav>
           </div>
         </div>
-      )}
+
+        {/* FILTER PANEL */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              id="filters-panel"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18 }}
+              className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#071018] transition-colors"
+            >
+              <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                  {/* LEFT: Genres + quick filters + presets */}
+                  <div className="lg:col-span-2">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">
+                        🎵 Gatunki {genres.length > 0 && `(${genres.length} wybranych)`}
+                      </p>
+
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Szukaj gatunku..."
+                          value={genreSearch}
+                          onChange={(e) => setGenreSearch(e.target.value)}
+                          className="px-3 py-1 rounded-lg text-sm w-36 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0f14] text-gray-900 dark:text-gray-100 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
+                      {filteredGenres.map((g) => {
+                        const active = genres.includes(g);
+                        return (
+                          <button
+                            key={g}
+                            onClick={() => handleGenreToggle(g)}
+                            className={`px-3 py-1.5 rounded-full text-sm border transition-all ${active ? "bg-blue-500 text-white border-blue-600" : "bg-gray-100 dark:bg-[#071018] text-gray-800 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-[#0b1316]"}`}
+                          >
+                            {g}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Quick filters */}
+                    <div className="mt-6 mb-4">
+                      <p className="font-semibold mb-3 text-sm text-gray-700 dark:text-gray-300">🚀 Szybkie filtry</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={applyQuickNewReleases}
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          style={{
+                            background: "rgba(0,234,255,0.08)",
+                            border: "1px solid rgba(0,234,255,0.18)",
+                            color: NEON.blue,
+                          }}
+                        >
+                          📅 Nowości (2020-2024)
+                        </button>
+
+                        <button
+                          onClick={applyQuickTopRatings}
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          style={{
+                            background: "rgba(255,45,255,0.08)",
+                            border: "1px solid rgba(255,45,255,0.18)",
+                            color: NEON.magenta,
+                          }}
+                        >
+                          ⭐ Top oceny (8+)
+                        </button>
+
+                        <button
+                          onClick={() => { clearAllFilters(); }}
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          style={{
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            color: "#9fb6d6",
+                          }}
+                        >
+                          🧹 Wyczyść wszystko
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Presets */}
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">💾 Zapisane preset-y</p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowPresetsEditor(s => !s)}
+                            className="text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-700 dark:text-gray-100"
+                          >
+                            {showPresetsEditor ? "Anuluj" : "Zapisz preset"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {filterPresets.map((preset, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <button
+                              onClick={() => applyPreset(preset)}
+                              className="px-3 py-1.5 rounded-full text-sm border transition-all hover:scale-105"
+                              style={{
+                                background: "linear-gradient(45deg, rgba(138,43,226,0.06), rgba(0,234,255,0.06))",
+                                border: "1px solid rgba(138,43,226,0.12)",
+                                color: NEON.purple,
+                              }}
+                            >
+                              🎵 {preset.name}
+                            </button>
+                            <button
+                              onClick={() => deletePreset(idx)}
+                              className="text-xs px-2 py-1 rounded-md text-red-500"
+                              title="Usuń preset"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {showPresetsEditor && (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Nazwa presetu"
+                            value={newPresetName}
+                            onChange={e => setNewPresetName(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Gatunki (oddzielone przecinkami)"
+                            value={newPresetGenres}
+                            onChange={e => setNewPresetGenres(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                // quick save from current selection if genres not provided
+                                const g = newPresetGenres.trim().length ? newPresetGenres.split(",").map(s => s.trim()).filter(Boolean) : genres;
+                                const name = newPresetName.trim() || `Preset ${filterPresets.length + 1}`;
+                                if (g.length === 0) {
+                                  // fallback: deny empty presets
+                                  return alert("Podaj gatunki lub wybierz je z listy.");
+                                }
+                                setFilterPresets(p => [{ name, genres: g, years: `${yearFrom || ""}-${yearTo || ""}` }, ...p].slice(0, 12));
+                                setNewPresetName("");
+                                setNewPresetGenres("");
+                                setShowPresetsEditor(false);
+                              }}
+                              className="px-3 py-2 rounded-md bg-blue-500 text-white"
+                            >
+                              Zapisz preset
+                            </button>
+
+                            <button
+                              onClick={() => { setShowPresetsEditor(false); }}
+                              className="px-3 py-2 rounded-md border"
+                            >
+                              Anuluj
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* RIGHT: Year, Rating slider, actions */}
+                  <div className="space-y-4">
+                    {/* Year */}
+                    <div>
+                      <p className="font-semibold mb-2 text-sm text-gray-700 dark:text-gray-300">Rok wydania</p>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          placeholder="Od"
+                          value={yearFrom || ""}
+                          onChange={e => setYearFrom(e.target.value)}
+                          className="w-1/2 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Do"
+                          value={yearTo || ""}
+                          onChange={e => setYearTo(e.target.value)}
+                          className="w-1/2 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Rating slider */}
+                    <div>
+                      <p className="font-semibold mb-2 text-sm text-gray-700 dark:text-gray-300">
+                        ⭐ Minimalna ocena: <span style={{ color: NEON.cyan }}>{ratingMin || 0}/10</span>
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={1}
+                          value={Number(ratingMin || 0)}
+                          onChange={e => setRatingMin(String(e.target.value))}
+                          className="flex-1"
+                          aria-label="Minimalna ocena"
+                        />
+                        <div className="w-12 text-center font-bold" style={{ color: NEON.cyan }}>
+                          {ratingMin || 0}
+                        </div>
+                      </div>
+                      <div className="flex justify-between text-xs mt-1 text-gray-400">
+                        <span>0</span>
+                        <span>10</span>
+                      </div>
+                    </div>
+
+                    {/* Active filters visualization */}
+                    <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {hasActiveFilters ? (
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <span className="font-semibold" style={{ color: NEON.cyan }}>Aktywne filtry:</span>
+                            {search && (
+                              <span className="px-2 py-1 rounded-full text-xs" style={{ background: "rgba(0,234,255,0.08)", color: NEON.blue }}>
+                                🔍 "{search}"
+                              </span>
+                            )}
+                            {genres.map(g => (
+                              <span key={g} className="px-2 py-1 rounded-full text-xs" style={{ background: "rgba(255,45,255,0.06)", color: NEON.magenta }}>
+                                🎵 {g}
+                              </span>
+                            ))}
+                            {yearFrom && yearTo && (
+                              <span className="px-2 py-1 rounded-full text-xs" style={{ background: "rgba(138,43,226,0.06)", color: NEON.purple }}>
+                                📅 {yearFrom}-{yearTo}
+                              </span>
+                            )}
+                            {ratingMin && (
+                              <span className="px-2 py-1 rounded-full text-xs" style={{ background: "rgba(255,200,0,0.06)", color: "#ffca28" }}>
+                                ⭐ ≥ {ratingMin}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span>Brak aktywnych filtrów</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-3 mt-4">
+                      <button
+                        onClick={() => { applyFiltersToURL(); setShowFilters(false); }}
+                        className="flex-1 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white"
+                      >
+                        Zastosuj filtry
+                      </button>
+
+                      <button
+                        onClick={() => { clearAllFilters(); }}
+                        className="px-4 py-2 rounded-lg border"
+                      >
+                        Wyczyść
+                      </button>
+
+                      <button
+                        onClick={() => setShowFilters(false)}
+                        className="px-4 py-2 rounded-lg bg-gray-600 text-white"
+                      >
+                        Zamknij
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* small hint */}
+                <div className="mt-4 text-xs text-gray-400">
+                  Tip: Kliknij nazwy gatunków, aby dodać je do filtrów. Presety są zapisywane w LocalStorage.
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </header>
   );
 }
