@@ -9,17 +9,15 @@
     "start": "next start"
   },
   "dependencies": {
-<<<<<<< HEAD
-=======
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
->>>>>>> 3a6798f ('')
     "@supabase/supabase-js": "^2.81.1",
     "@tailwindcss/postcss": "^4.1.17",
     "axios": "^1.13.2",
     "cheerio": "^1.1.2",
-<<<<<<< HEAD
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "express": "^5.2.1",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.553.0",
     "next": "^14.2.33",
@@ -28,19 +26,6 @@
     "postcss": "^8.5.6",
     "react": "18.3.1",
     "react-dom": "18.3.1"
-=======
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "framer-motion": "^11.18.2",
-    "lucide-react": "^0.553.0",
-    "next": "^16.0.6",
-    "openai": "^6.9.0",
-    "playwright": "^1.56.1",
-    "postcss": "^8.5.6",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
->>>>>>> 3a6798f ('')
   },
   "devDependencies": {
     "@ljharb/tsconfig": "^0.3.2",
@@ -49,8 +34,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/spotify-web-api-node": "^5.0.11",
-    "eslint": "^9",
-    "eslint-config-next": "16.0.1",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.33",
     "https-localhost": "^4.7.1",
     "tailwindcss": "^4.1.17",
     "typescript": "^5"
