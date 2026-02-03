@@ -1,4 +1,5 @@
 // pages/index.tsx
+<<<<<<< HEAD
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../src/lib/supabaseClient";
@@ -1248,11 +1249,115 @@ className={`pt-24 pb-10 min-h-screen transition-colors duration-300
               style={{
                 background: "linear-gradient(90deg, rgba(255,0,255,0.02), rgba(0,234,255,0.02))",
                 border: "1px solid rgba(255,255,255,0.03)",
+=======
+
+import React from 'react';
+
+// Importy hooków
+import { useFilters } from '../src/hooks/useFilters';
+import { useTheme } from '../src/hooks/useTheme';
+import { useAlbumColumns } from '../src/hooks/useAlbumColumns';
+import { useAlbumData } from '../src/hooks/useAlbumData'; // Zakładamy, że ten hook istnieje
+
+// Importy komponentów
+import { Top10Slider } from '../src/components/Top10Slider';
+import { RecommendationsSidebar } from '../src/components/RecommendationsSidebar';
+import {AlbumCards} from '../src/components/AlbumCards'; // Zakładamy, że ten komponent istnieje
+
+const ALBUMS_PER_PAGE = 15;
+
+export default function HomePage() {
+  // --- HOOKS ---
+  useTheme(); // Inicjalizuje i zarządza motywem aplikacji
+  const filters = useFilters();
+  const albumGridCols = useAlbumColumns();
+
+  // Główny hook do zarządzania danymi z API.
+  // Przekazujemy do niego filtry i limit, a on zwraca potrzebne dane i handlery.
+  const {
+    albums,
+    top10Albums,
+    newReleases,
+    recommendations,
+    total,
+    loading, // Dodatkowy stan ładowania dla lepszego UX
+    handleToggleFavorite,
+    handleUpsertRating,
+  } = useAlbumData({ ...filters, ratingMin: filters.ratingMin === "" ? undefined : String(filters.ratingMin) }, ALBUMS_PER_PAGE);
+
+  // --- RENDEROWANIE ---
+
+  return (
+    <main
+      className={`pt-24 pb-10 min-h-screen transition-colors duration-300
+        bg-white text-black
+        dark:bg-[#03060a] dark:text-[#e6eef8]
+        dark:bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(138,43,226,0.06),transparent),radial-gradient(1000px_500px_at_90%_90%,rgba(0,234,255,0.04),transparent),#03060a]
+      `}
+    >
+      <div className="w-full px-4 max-w-[1920px] mx-auto">
+
+        {/* --- SEKCJA TOP 10 ALBUMÓW --- */}
+        <Top10Slider
+          albums={top10Albums}
+          onToggleFavorite={handleToggleFavorite}
+          onRate={handleUpsertRating}
+        />
+
+        {/* --- GŁÓWNY LAYOUT: LISTA ALBUMÓW + PANEL BOCZNY --- */}
+        <section className="mb-12 flex flex-col lg:flex-row gap-8 w-full">
+
+          {/* LEWA STRONA – SIATKA ALBUMÓW */}
+          <div className="flex-1">
+            {loading ? (
+              <div className="py-24 text-center text-gray-400">Ładowanie albumów...</div>
+            ) : albums.length > 0 ? (
+              <div
+                className="grid gap-x-6 gap-y-16 justify-items-center sm:justify-items-start"
+                style={{ gridTemplateColumns: `repeat(${albumGridCols}, minmax(0, 1fr))` }}
+              >
+                {albums.map(album => (
+                  <AlbumCards
+                    key={album.id}
+                    album={album}
+                    onToggleFavorite={handleToggleFavorite}
+                    onRate={handleUpsertRating}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="py-24 text-center text-gray-400">
+                <p className="text-xl">Brak albumów pasujących do filtrów.</p>
+                <p>Spróbuj zmienić kryteria wyszukiwania.</p>
+              </div>
+            )}
+          </div>
+
+          {/* PRAWA STRONA – PANEL Z REKOMENDACJAMI */}
+          <RecommendationsSidebar
+            newReleases={newReleases}
+            recommendations={recommendations}
+            topAlbums={top10Albums}
+          />
+        </section>
+
+        {/* --- PAGINACJA --- */}
+        {total && total > ALBUMS_PER_PAGE && (
+          <div className="mt-10 flex justify-center items-center gap-4">
+            <button
+              disabled={filters.page === 1}
+              onClick={() => filters.setPage(p => Math.max(1, p - 1))}
+              className="px-4 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:scale-[0.98]"
+              style={{
+                background: "linear-gradient(90deg, rgba(255,0,255,0.1), rgba(0,234,255,0.1))",
+                border: "1px solid rgba(255,255,255,0.1)",
+>>>>>>> 3a6798f ('')
                 color: "#dff6ff",
               }}
             >
               ← Poprzednia
             </button>
+<<<<<<< HEAD
 
             <span style={{ color: "#cfeaff", alignSelf: "center" }}>
               Strona {page}
@@ -1265,6 +1370,18 @@ className={`pt-24 pb-10 min-h-screen transition-colors duration-300
               style={{
                 background: "linear-gradient(90deg, rgba(0,234,255,0.02), rgba(255,0,255,0.02))",
                 border: "1px solid rgba(255,255,255,0.03)",
+=======
+            <span className="text-gray-700 dark:text-[#cfeaff] font-semibold">
+              Strona {filters.page} / {Math.ceil(total / ALBUMS_PER_PAGE)}
+            </span>
+            <button
+              disabled={filters.page >= Math.ceil(total / ALBUMS_PER_PAGE)}
+              onClick={() => filters.setPage(p => p + 1)}
+              className="px-4 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:scale-[0.98]"
+               style={{
+                background: "linear-gradient(90deg, rgba(0,234,255,0.1), rgba(255,0,255,0.1))",
+                border: "1px solid rgba(255,255,255,0.1)",
+>>>>>>> 3a6798f ('')
                 color: "#dff6ff",
               }}
             >
@@ -1275,4 +1392,8 @@ className={`pt-24 pb-10 min-h-screen transition-colors duration-300
       </div>
     </main>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 3a6798f ('')

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // src/hooks/useFilters.ts
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
@@ -96,3 +97,138 @@ export function useFilters() {
     clearAllFilters
   };
 }
+=======
+﻿// src/hooks/useFilters.ts
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+
+// Helper do usuwania pustych właściwości
+const cleanObject = (obj: Record<string, any>): Record<string, any> => {
+  Object.keys(obj).forEach(key => (obj[key] === null || obj[key] === '') && delete obj[key]);
+  return obj;
+};
+
+export function useFilters() {
+  const router = useRouter();
+
+  // Stan wewnętrzny hooka
+  const [search, setSearch] = useState<string>('');
+  const [genreFilter, setGenreFilter] = useState<string>('');
+  const [yearFrom, setYearFrom] = useState<string>('');
+  const [yearTo, setYearTo] = useState<string>('');
+  const [ratingMin, setRatingMin] = useState<string>('');
+  const [sortBy, setSortBy] = useState<string>('year');
+  const [page, setPage] = useState<number>(1);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const buildQuery = (override: Record<string, any> = {}) => {
+    const query = cleanObject({
+      search,
+      genre: genreFilter,
+      yearFrom,
+      yearTo,
+      ratingMin,
+      sortBy: sortBy === 'year' ? null : sortBy,
+      page: page > 1 ? page : null,
+      ...override,
+    });
+
+    // Zachowaj dynamiczne parametry trasy (np. /album/[id], /username/[username])
+    const preservedQuery = { ...router.query };
+    delete preservedQuery.search;
+    delete preservedQuery.genre;
+    delete preservedQuery.yearFrom;
+    delete preservedQuery.yearTo;
+    delete preservedQuery.ratingMin;
+    delete preservedQuery.sortBy;
+    delete preservedQuery.page;
+
+    return { ...preservedQuery, ...query };
+  };
+
+  const applyFiltersToURL = () => {
+    const nextQuery = buildQuery();
+    router.push({ pathname: router.pathname, query: nextQuery }, undefined, { shallow: true });
+  };
+
+  const clearAllFilters = () => {
+    setSearch('');
+    setGenreFilter('');
+    setYearFrom('');
+    setYearTo('');
+    setRatingMin('');
+    setSortBy('year');
+    setPage(1);
+
+    const nextQuery = buildQuery({
+      search: null,
+      genre: null,
+      yearFrom: null,
+      yearTo: null,
+      ratingMin: null,
+      sortBy: null,
+      page: null,
+    });
+
+    router.push({ pathname: router.pathname, query: nextQuery }, undefined, { shallow: true });
+  };
+
+  // Efekt 1: Inicjalizacja stanu z URL
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const { query } = router;
+    setSearch((query.search as string) || '');
+    setGenreFilter((query.genre as string) || '');
+    setYearFrom((query.yearFrom as string) || '');
+    setYearTo((query.yearTo as string) || '');
+    setRatingMin((query.ratingMin as string) || '');
+    setSortBy((query.sortBy as string) || 'year');
+    setPage(Number(query.page) || 1);
+    setIsInitialized(true);
+  }, [router.isReady]);
+
+  // Efekt 2: Aktualizacja URL ze stanu
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const nextQuery = buildQuery();
+    const currentQueryString = new URLSearchParams(router.query as any).toString();
+    const newQueryString = new URLSearchParams(nextQuery as any).toString();
+
+    if (currentQueryString !== newQueryString) {
+      router.push(
+        { pathname: router.pathname, query: nextQuery },
+        undefined,
+        { shallow: true }
+      );
+    }
+  }, [search, genreFilter, yearFrom, yearTo, ratingMin, sortBy, page, isInitialized, router]);
+
+  // Settery z resetowaniem strony
+  const createSetter = <T,>(setter: (value: T) => void) => (value: T) => {
+    setPage(1);
+    setter(value);
+  };
+
+  return {
+    search,
+    genreFilter,
+    yearFrom,
+    yearTo,
+    ratingMin,
+    sortBy,
+    page,
+    setSearch: createSetter(setSearch),
+    setGenreFilter: createSetter(setGenreFilter),
+    setYearFrom: createSetter(setYearFrom),
+    setYearTo: createSetter(setYearTo),
+    setRatingMin: createSetter(setRatingMin),
+    setSortBy: createSetter(setSortBy),
+    setPage,
+    applyFiltersToURL,
+    clearAllFilters,
+  };
+}
+>>>>>>> 3a6798f ('')
