@@ -76,7 +76,7 @@ export function AlbumCards({
   // --- RENDER ---
   return (
     <motion.div
-      className="relative rounded-xl overflow-visible cursor-pointer"
+      className="relative w-full max-w-[240px] rounded-xl overflow-visible cursor-pointer"
       style={{
         background: "linear-gradient(180deg, rgba(10,12,18,0.85), rgba(8,10,14,0.7))",
         border: "1px solid rgba(255,255,255,0.02)",
