@@ -1,0 +1,43 @@
+{
+  "name": "album",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@supabase/supabase-js": "^2.81.1",
+    "@tailwindcss/postcss": "^4.1.17",
+    "axios": "^1.13.2",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.553.0",
+    "next": "^14.2.33",
+    "openai": "^6.9.0",
+    "playwright": "^1.56.1",
+    "postcss": "^8.5.6",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@ljharb/tsconfig": "^0.3.2",
+    "@tailwindcss/vite": "^4.1.17",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/spotify-web-api-node": "^5.0.11",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.33",
+    "https-localhost": "^4.7.1",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5"
+  }
+}

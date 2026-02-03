@@ -379,8 +379,9 @@ return (
                       <button
                         onClick={(e) => {
                           e.stopPropagation(); // Zapobiega kliknięciu na cały element
-                          // Możesz dodać odtwarzanie podglądu
-                          const audio = new Audio(t.preview_url);
+                          const previewUrl = t.preview_url;
+                          if (!previewUrl) return;
+                          const audio = new Audio(previewUrl);
                           audio.play();
                         }}
                         className="text-xs text-blue-400 hover:text-blue-300"

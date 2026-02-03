@@ -14,6 +14,7 @@ interface Album {
   id: string | number;
   title: string;
   cover_url: string;
+  rank?: number;
   artist_name?: string;
   genre?: string | null;
   avg_rating?: number | string;

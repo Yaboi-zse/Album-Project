@@ -31,6 +31,8 @@ interface Filters {
 
 interface Album {
   id: string | number;
+  title: string;
+  cover_url: string;
   [key: string]: any;
 }
 

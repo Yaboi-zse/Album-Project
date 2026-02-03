@@ -275,7 +275,7 @@ export default function Header() {
   };
 
   const applyQuickTopRatings = () => {
-    setRatingMin("8");
+    setRatingMin(8);
     applyFiltersToURL();
   };
 
@@ -693,7 +693,7 @@ export default function Header() {
                           max={10}
                           step={1}
                           value={Number(ratingMin || 0)}
-                          onChange={e => setRatingMin(String(e.target.value))}
+                          onChange={e => setRatingMin(Number(e.target.value))}
                           className="flex-1"
                           aria-label="Minimalna ocena"
                         />

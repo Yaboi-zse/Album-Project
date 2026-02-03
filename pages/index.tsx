@@ -5,7 +5,6 @@ import React from 'react';
 // Importy hooków
 import { useFilters } from '../src/hooks/useFilters';
 import { useTheme } from '../src/hooks/useTheme';
-import { useAlbumColumns } from '../src/hooks/useAlbumColumns';
 import { useAlbumData } from '../src/hooks/useAlbumData';
 
 // Importy komponentów

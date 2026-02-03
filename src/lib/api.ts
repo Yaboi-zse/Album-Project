@@ -1,4 +1,4 @@
-// src/lib/api.ts
+﻿// src/lib/api.ts
 
 import { supabase } from "./supabaseClient";
 
@@ -23,11 +23,11 @@ interface Artist {
 interface Album {
   id: string | number;
   title: string;
-  year: number;
-  genre: string | null;
+  year?: number;
+  genre?: string | null;
   cover_url: string;
-  artist_id: number;
-  artists: Artist | { name: string } | null;
+  artist_id?: number;
+  artists: { name: string }[] | { name: string } | null;
 }
 
 // --- FUNKCJE API ---
@@ -44,7 +44,11 @@ export async function fetchGenres() {
     console.error("Error fetching genres:", error);
     return [];
   }
-  const uniqueGenres = Array.from(new Set(data.flatMap(a => (a.genre || "").split(",").map(g => g.trim()).filter(Boolean)))).sort();
+  const uniqueGenres = Array.from(
+    new Set(
+      data.flatMap((a: { genre?: string | null }) => (a.genre || "").split(",").map((g: string) => g.trim()).filter(Boolean))
+    )
+  ).sort();
   return uniqueGenres;
 }
 
@@ -63,7 +67,7 @@ export async function fetchAlbums(filters: AlbumFilters) {
     const { data: albumRows, count: totalCount, error: queryError } = await query;
     if (queryError) throw queryError;
     if (!albumRows || albumRows.length === 0) return { albums: [], total: totalCount ?? 0 };
-    const albumIds = albumRows.map((r: Album) => r.id);
+    const albumIds = albumRows.map((r: { id: string | number }) => r.id);
     const [ratingsRes, favsRes, userRes] = await Promise.all([
       supabase.from("ratings").select("album_id, rating").in("album_id", albumIds),
       supabase.from("favorites").select("album_id, user_id").in("album_id", albumIds),
@@ -73,18 +77,26 @@ export async function fetchAlbums(filters: AlbumFilters) {
     let userRatings: any[] = [];
     let userFavs: any[] = [];
     if (currentUser) {
-        const [ur, uf] = await Promise.all([
-             supabase.from("ratings").select("album_id, rating").eq("user_id", currentUser.id).in("album_id", albumIds),
-             supabase.from("favorites").select("album_id").eq("user_id", currentUser.id).in("album_id", albumIds),
-        ]);
-        userRatings = ur.data || [];
-        userFavs = uf.data || [];
+      const [ur, uf] = await Promise.all([
+        supabase.from("ratings").select("album_id, rating").eq("user_id", currentUser.id).in("album_id", albumIds),
+        supabase.from("favorites").select("album_id").eq("user_id", currentUser.id).in("album_id", albumIds),
+      ]);
+      userRatings = ur.data || [];
+      userFavs = uf.data || [];
     }
     const ratingsByAlbum = (ratingsRes.data || []).reduce((acc, r) => { (acc[r.album_id] = acc[r.album_id] || []).push(Number(r.rating)); return acc; }, {} as Record<string, number[]>);
     const favCount = (favsRes.data || []).reduce((acc, f) => { acc[f.album_id] = (acc[f.album_id] || 0) + 1; return acc; }, {} as Record<string, number>);
-    let combined = albumRows.map((a: Album) => ({ ...a, artist_name: (a.artists as any)?.name ?? "Nieznany artysta", avg_rating: (ratingsByAlbum[a.id as string] || []).length > 0 ? Number(((ratingsByAlbum[a.id as string] || []).reduce((s, x) => s + x, 0) / (ratingsByAlbum[a.id as string] || []).length).toFixed(1)) : "—", votes: (ratingsByAlbum[a.id as string] || []).length, favorites_count: favCount[a.id as string] || 0, is_favorite: userFavs.some((f) => f.album_id === a.id), user_rating: userRatings.find((ur) => ur.album_id === a.id) ? Number(userRatings.find((ur) => ur.album_id === a.id).rating) : null }));
+    let combined = albumRows.map((a: Album) => ({
+      ...a,
+      artist_name: Array.isArray(a.artists) ? a.artists[0]?.name ?? "Nieznany artysta" : a.artists?.name ?? "Nieznany artysta",
+      avg_rating: (ratingsByAlbum[a.id as string] || []).length > 0 ? Number(((ratingsByAlbum[a.id as string] || []).reduce((s, x) => s + x, 0) / (ratingsByAlbum[a.id as string] || []).length).toFixed(1)) : "—",
+      votes: (ratingsByAlbum[a.id as string] || []).length,
+      favorites_count: favCount[a.id as string] || 0,
+      is_favorite: userFavs.some((f) => f.album_id === a.id),
+      user_rating: userRatings.find((ur) => ur.album_id === a.id) ? Number(userRatings.find((ur) => ur.album_id === a.id).rating) : null
+    }));
     if (ratingMin) combined = combined.filter(album => album.avg_rating !== "—" && Number(album.avg_rating) >= Number(ratingMin));
-    if (genreFilter) { const genreList = genreFilter.split(',').map(g => g.trim().toLowerCase()).filter(Boolean); if (genreList.length > 0) combined = combined.filter(album => album.genre && genreList.some(selectedGenre => album.genre!.split(',').map(g => g.trim().toLowerCase()).some(albumGenre => albumGenre.includes(selectedGenre)))); }
+    if (genreFilter) { const genreList = genreFilter.split(',').map((g: string) => g.trim().toLowerCase()).filter(Boolean); if (genreList.length > 0) combined = combined.filter(album => album.genre && genreList.some(selectedGenre => album.genre!.split(',').map((g: string) => g.trim().toLowerCase()).some(albumGenre => albumGenre.includes(selectedGenre)))); }
     return { albums: combined, total: totalCount ?? 0 };
   } catch (e) {
     console.error("Error in fetchAlbums:", e);
@@ -112,9 +124,9 @@ export async function fetchTop10Albums() {
     const { data: albumsData, error: albumsError } = await supabase.from("albums").select(`id, title, year, genre, cover_url, artists(name)`).in("id", albumIds);
     if (albumsError) throw albumsError;
     if (!albumsData) return [];
-    const albumsWithDetails = albumsData.map(album => {
+    const albumsWithDetails = albumsData.map((album: Album) => {
       const ratingInfo = albumsWithAvgRating.find(item => item.album_id === album.id);
-      return { ...album, artist_name: (album.artists as any)?.name ?? "Nieznany artysta", avg_rating: ratingInfo?.avg_rating ?? 0, votes: ratingInfo?.votes ?? 0 };
+      return { ...album, artist_name: Array.isArray(album.artists) ? album.artists[0]?.name ?? "Nieznany artysta" : album.artists?.name ?? "Nieznany artysta", avg_rating: ratingInfo?.avg_rating ?? 0, votes: ratingInfo?.votes ?? 0 };
     });
     return albumsWithDetails.sort((a, b) => (b.avg_rating || 0) - (a.avg_rating || 0));
   } catch (error) {
@@ -126,7 +138,7 @@ export async function fetchTop10Albums() {
 export async function fetchNewReleases() {
   const { data, error } = await supabase.from("albums").select(`id, title, cover_url, artists(name)`).order("created_at", { ascending: false }).limit(8);
   if (error) console.error("Error fetching new releases:", error);
-  return (data || []).map(album => ({ ...album, artist_name: (album.artists as any)?.name ?? "Nieznany artysta" }));
+  return (data || []).map((album: Album) => ({ ...album, artist_name: Array.isArray(album.artists) ? album.artists[0]?.name ?? "Nieznany artysta" : album.artists?.name ?? "Nieznany artysta" }));
 }
 
 export async function fetchRecommendations(userId: string) {
@@ -136,9 +148,9 @@ export async function fetchRecommendations(userId: string) {
   const ratedIds = myRatings.map(r => r.album_id);
   const { data: likedAlbums } = await supabase.from("albums").select("genre").in("id", ratedIds).not("genre", "is", null);
   if (!likedAlbums || likedAlbums.length === 0) return [];
-  const genres = Array.from(new Set(likedAlbums.flatMap(a => (a.genre || "").split(",").map(g => g.trim()).filter(Boolean))));
+  const genres = Array.from(new Set(likedAlbums.flatMap((a: { genre?: string | null }) => (a.genre || "").split(",").map((g: string) => g.trim()).filter(Boolean))));
   if (genres.length === 0) return [];
-  const orConditions = genres.map(g => `genre.ilike.%${g}%`).join(",");
+  const orConditions = genres.map((g: string) => `genre.ilike.%${g}%`).join(",");
   const { data: candidates, error } = await supabase.from("albums").select(`id, title, cover_url, artists(name), genre`).or(orConditions).not("id", "in", `(${ratedIds.join(",")})`).limit(10);
   if (error) console.error("Error fetching recommendations:", error);
   return candidates || [];
