@@ -1,4 +1,4 @@
-// pages/track/[id].tsx
+﻿// pages/track/[id].tsx
 import { useRouter } from "next/router";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -14,6 +14,16 @@ type Track = {
   spotify_url?: string;
   preview_url?: string | null;
   artist_name?: string;
+  artist_id?: string | null;
+  artist_display_name?: string | null;
+  albums?: {
+    id?: string;
+    title?: string;
+    cover_url?: string;
+    artist_id?: string;
+    artist_name?: string;
+    artists?: { id?: string; name?: string } | { id?: string; name?: string }[] | null;
+  } | null;
 };
 
 type LyricLine = {
@@ -21,6 +31,8 @@ type LyricLine = {
   words?: string[];
   isSection?: boolean;
 };
+
+const FALLBACK_BG = "/mnt/data/e4520bdf-552d-47a4-93b6-d3df905166b3.png";
 
 export default function TrackPage() {
   const router = useRouter();
@@ -44,187 +56,292 @@ export default function TrackPage() {
   const [fsActiveIdx, setFsActiveIdx] = useState(-1);
   const loopRef = useRef<number | null>(null);
 
- // ---------- load track ----------
-useEffect(() => {
-  if (!trackId) return;
+  const normalizeArtistName = (name: string) =>
+    name
+      .split(/,|&| feat\.| ft\.| x | with | and /i)[0]
+      .trim();
 
-  let cancel = false;
+  // ---------- load track ----------
+  useEffect(() => {
+    if (!trackId) return;
 
-  async function loadTrack() {
-    setLoading(true);
-    setTrack(null);
-    setError(null);
+    let cancel = false;
 
-    try {
-      const isUUID = /^[0-9a-fA-F-]{8}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{12}$/.test(
-        trackId as string
-      );
+    async function loadTrack() {
+      setLoading(true);
+      setTrack(null);
+      setError(null);
 
-      // 🔥 poprawny SELECT – multiline, Supabase go akceptuje
-      let query = supabase
-        .from("tracks")
-        .select("id, album_id, title, duration, track_number, spotify_id, spotify_url, preview_url, artist_name")
-; 
-      // 🔥 jeśli ID jest uuid → szukaj po id
-      if (trackId) {
-        if (isUUID) query = query.eq("id", trackId as string);
-        else query = query.eq("spotify_id", trackId as string);
-      }
-      const { data: local, error: localErr } = await query.maybeSingle();
+      try {
+        const isUUID = /^[0-9a-fA-F-]{8}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{12}$/.test(
+          trackId as string
+        );
 
-      if (localErr) {
-        console.warn("Supabase local lookup error:", localErr);
-      }
+        // poprawny SELECT – multiline, Supabase go akceptuje
+        let query = supabase
+          .from("tracks")
+          .select(
+            "id, album_id, title, duration, track_number, spotify_id, spotify_url, preview_url, artist_name, albums(id, title, cover_url, artist_id, artist_name, artists(id, name))"
+          );
 
-      if (local && !cancel) {
-        setTrack(local as Track);
-        setLoading(false);
-        return;
-      }
+        // jeśli ID jest uuid → szukaj po id
+        if (trackId) {
+          if (isUUID) query = query.eq("id", trackId as string);
+          else query = query.eq("spotify_id", trackId as string);
+        }
+        const { data: local, error: localErr } = await query.maybeSingle();
 
-      // ---------- remote Spotify fallback ----------
-      const safeId = trackId ?? "";
-      const res = await fetch(`/api/spotify/track?track_id=${encodeURIComponent(safeId)}`);
-      if (res.ok) {
-        const t = await res.json();
-
-        const normalized: Track = {
-          spotify_id: t.id,
-          title: t.title ?? t.name,
-          duration: t.duration_ms ? Math.floor(t.duration_ms / 1000) : undefined,
-          preview_url: null,
-          spotify_url: t.external_urls?.spotify ?? null,
-          artist_name: t.artist ?? null,
-          track_number: t.track_number,
-        };
-
-        try {
-          await supabase
-  .from("tracks")
-  .upsert(normalized, {
-    onConflict: "spotify_id",
-    ignoreDuplicates: false
-  })
-  .select();
-        } catch (upsertErr) {
-          console.warn("Upsert failed:", upsertErr);
+        if (localErr) {
+          console.warn("Supabase local lookup error:", localErr);
         }
 
-        if (!cancel) {
-          setTrack(normalized);
+        if (local && !cancel) {
+          const localTrack = local as Track;
+          const artistsRel = (localTrack as any).albums?.artists ?? null;
+          const artistsObj = Array.isArray(artistsRel) ? artistsRel[0] : artistsRel;
+          let artistId =
+            (localTrack as any).albums?.artist_id ?? artistsObj?.id ?? null;
+          let artistName =
+            artistsObj?.name ??
+            (localTrack as any).albums?.artist_name ??
+            localTrack.artist_name ??
+            null;
+
+          if (artistId && !artistName) {
+            const { data: artistRow } = await supabase
+              .from("artists")
+              .select("name")
+              .eq("id", artistId)
+              .maybeSingle();
+            artistName = artistRow?.name ?? artistName;
+          }
+
+          if (!artistId && localTrack.album_id) {
+            const { data: albumData } = await supabase
+              .from("albums")
+              .select("id, artist_id, artist_name, artists(id, name)")
+              .eq("id", localTrack.album_id)
+              .maybeSingle();
+
+            const relArtists = (albumData as any)?.artists ?? null;
+            const relArtistObj = Array.isArray(relArtists) ? relArtists[0] : relArtists;
+            artistId = albumData?.artist_id ?? relArtistObj?.id ?? artistId;
+            artistName = relArtistObj?.name ?? albumData?.artist_name ?? artistName;
+          }
+
+          if (!artistId && artistName) {
+            const baseName = normalizeArtistName(artistName);
+            const { data: artistRow } = await supabase
+              .from("artists")
+              .select("id, name")
+              .ilike("name", baseName)
+              .maybeSingle();
+            artistId = artistRow?.id ?? artistId;
+            artistName = artistRow?.name ?? artistName;
+          }
+
+          if (artistId && !artistName) {
+            const { data: artistRow } = await supabase
+              .from("artists")
+              .select("name")
+              .eq("id", artistId)
+              .maybeSingle();
+            artistName = artistRow?.name ?? artistName;
+          }
+
+          if (!artistId && !artistName && localTrack.spotify_id) {
+            try {
+              const res = await fetch(
+                `/api/spotify/track?track_id=${encodeURIComponent(localTrack.spotify_id)}`
+              );
+              if (res.ok) {
+                const t = await res.json();
+                const primaryArtist = Array.isArray(t.artists) ? t.artists[0] : null;
+                artistName = primaryArtist?.name ?? artistName;
+
+                if (artistName) {
+                  const baseName = normalizeArtistName(artistName);
+                  const { data: artistRow } = await supabase
+                    .from("artists")
+                    .select("id, name")
+                    .ilike("name", baseName)
+                    .maybeSingle();
+                  artistId = artistRow?.id ?? artistId;
+                  artistName = artistRow?.name ?? artistName;
+                }
+              }
+            } catch {}
+          }
+
+          setTrack({
+            ...localTrack,
+            artist_id: artistId,
+            artist_display_name: artistName,
+          });
           setLoading(false);
           return;
         }
-      } else {
-        console.warn("Spotify endpoint returned:", res.status);
-      }
 
-      if (!cancel) {
-        setError("Nie znaleziono danych utworu (lokalnie ani w Spotify).");
-        setLoading(false);
-      }
-    } catch (err: any) {
-      console.error("loadTrack ERROR:", err);
-      if (!cancel) {
-        setError(err?.message ?? "Błąd podczas ładowania utworu");
-        setLoading(false);
+        // ---------- remote Spotify fallback ----------
+        const safeId = trackId ?? "";
+        const res = await fetch(`/api/spotify/track?track_id=${encodeURIComponent(safeId)}`);
+        if (res.ok) {
+          const t = await res.json();
+
+          const primaryArtist = Array.isArray(t.artists) ? t.artists[0] : null;
+          const spotifyAlbumId = t.album?.id ?? null;
+          let resolvedAlbumId: string | undefined = undefined;
+          let resolvedArtistId: string | null = null;
+          let resolvedArtistName: string | null = null;
+
+          if (spotifyAlbumId) {
+            const { data: albumRow } = await supabase
+              .from("albums")
+              .select("id, artist_id, artist_name, artists(id, name), spotify_id")
+              .eq("spotify_id", spotifyAlbumId)
+              .maybeSingle();
+
+            const relArtists = (albumRow as any)?.artists ?? null;
+            const relArtistObj = Array.isArray(relArtists) ? relArtists[0] : relArtists;
+
+            resolvedAlbumId = albumRow?.id;
+            resolvedArtistId = albumRow?.artist_id ?? relArtistObj?.id ?? null;
+            resolvedArtistName = relArtistObj?.name ?? albumRow?.artist_name ?? null;
+          }
+
+          if (!resolvedArtistId && primaryArtist?.name) {
+            const baseName = normalizeArtistName(primaryArtist.name);
+            const { data: artistRow } = await supabase
+              .from("artists")
+              .select("id, name")
+              .ilike("name", baseName)
+              .maybeSingle();
+            resolvedArtistId = artistRow?.id ?? resolvedArtistId;
+            resolvedArtistName = artistRow?.name ?? resolvedArtistName;
+          }
+
+          if (resolvedArtistId && !resolvedArtistName) {
+            const { data: artistRow } = await supabase
+              .from("artists")
+              .select("name")
+              .eq("id", resolvedArtistId)
+              .maybeSingle();
+            resolvedArtistName = artistRow?.name ?? resolvedArtistName;
+          }
+
+          const normalized: Track = {
+            spotify_id: t.id,
+            title: t.title ?? t.name,
+            duration: t.duration_ms ? Math.floor(t.duration_ms / 1000) : undefined,
+            preview_url: null,
+            spotify_url: t.external_urls?.spotify ?? null,
+            artist_name: primaryArtist?.name ?? null,
+            track_number: t.track_number,
+            album_id: resolvedAlbumId,
+            artist_id: resolvedArtistId,
+            artist_display_name: resolvedArtistName ?? primaryArtist?.name ?? null,
+          };
+
+          try {
+            await supabase
+              .from("tracks")
+              .upsert(normalized, {
+                onConflict: "spotify_id",
+                ignoreDuplicates: false,
+              })
+              .select();
+          } catch (upsertErr) {
+            console.warn("Upsert failed:", upsertErr);
+          }
+
+          if (!cancel) {
+            setTrack(normalized);
+            setLoading(false);
+            return;
+          }
+        } else {
+          console.warn("Spotify endpoint returned:", res.status);
+        }
+
+        if (!cancel) {
+          setError("Nie znaleziono danych utworu (lokalnie ani w Spotify).");
+          setLoading(false);
+        }
+      } catch (err: any) {
+        console.error("loadTrack ERROR:", err);
+        if (!cancel) {
+          setError(err?.message ?? "Błąd podczas ładowania utworu");
+          setLoading(false);
+        }
       }
     }
-  }
 
-  loadTrack();
-  return () => {
-    cancel = true;
-  };
-}, [trackId]);
+    loadTrack();
+    return () => {
+      cancel = true;
+    };
+  }, [trackId]);
 
+  // ---------- LOAD LYRICS ----------
+  useEffect(() => {
+    if (!track) return;
+    if (!track.title || (!track.artist_display_name && !track.artist_name)) return;
 
-// ---------- LOAD LYRICS ----------
-useEffect(() => {
-  if (!track) {
-    console.log("loadLyrics NOT TRIGGERED – track is null");
-    return;
-  }
+    let cancel = false;
 
-  if (!track.title || !track.artist_name) {
-    console.log("loadLyrics NOT TRIGGERED – missing title or artist", track);
-    return;
-  }
+    async function load() {
+      setLyricsLoading(true);
 
-  console.log("loadLyrics TRIGGERED WITH:", track);
-
-  let cancel = false;
-
-  async function load() {
-    setLyricsLoading(true);
-
-    try {
-      if (!track) return;
-      const q = `${track.title ?? ""} ${track.artist_name ?? ""}`.trim();
-      console.log("FETCHING GENIUS FOR:", q);
-
-      const res = await fetch(`/api/genius/lyrics?q=${encodeURIComponent(q)}`);
-      console.log("GENIUS STATUS:", res.status);
-
-      const text = await res.text();
-      console.log("GENIUS RAW RESPONSE:", text.slice(0, 400));
-
-      let payload = null;
       try {
-        payload = JSON.parse(text);
-      } catch {
-        console.warn("GENIUS JSON PARSE FAILED");
-      }
+        if (!track) return;
+        const titleParam = track.title ?? "";
+        const artistParam = normalizeArtistName(track.artist_display_name ?? track.artist_name ?? "");
 
-      console.log("GENIUS PARSED:", payload);
+        const res = await fetch(
+          `/api/genius/lyrics?title=${encodeURIComponent(titleParam)}&artist=${encodeURIComponent(artistParam)}`
+        );
+        const text = await res.text();
 
-      if (!payload || !payload.lyrics) {
-        console.warn("NO LYRICS FOUND");
-        if (!cancel) setLyricsRaw(null);
-        return;
-      }
+        let payload = null;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          console.warn("GENIUS JSON PARSE FAILED");
+        }
+
+        if (!payload || !payload.lyrics) {
+          if (!cancel) setLyricsRaw(null);
+          return;
+        }
 
         let clean = payload.lyrics
-        .split(/\r?\n/)
-        .map((l: string) => l.trim())
-        .filter((l: string) => {
-            // ❌ Contributors
+          .split(/\r?\n/)
+          .map((l: string) => l.trim())
+          .filter((l: string) => {
             if (/^\d+\s*Contributors$/i.test(l)) return false;
-
-            // ❌ Translations
             if (/^Translations$/i.test(l)) return false;
-
-            // ❌ SAD!Lyrics, Lyrics, etc.
             if (/Lyrics$/i.test(l)) return false;
-
-            // ❌ "Read More"
             if (/Read\s*More/i.test(l)) return false;
-
-            // ❌ Opisy zaczynające się od "On “SAD!” X laments..."
             if (/^On\s*[“"']?.*?\s+(laments|talks|explains|speaks|details)/i.test(l)) return false;
-
-            // ❌ Zlepione paragrafy (np. On“SAD!”Xlamentsabout...)
             if (/^On[“"'A-Za-z0-9]+/i.test(l)) return false;
-
             return l.length > 0;
-        })
-        .join("\n");
-      if (!cancel) setLyricsRaw(clean);
-    } catch (err) {
-      console.error("GENIUS FETCH ERROR:", err);
-      if (!cancel) setLyricsRaw(null);
-    } finally {
-      if (!cancel) setLyricsLoading(false);
+          })
+          .join("\n");
+
+        if (!cancel) setLyricsRaw(clean);
+      } catch (err) {
+        console.error("GENIUS FETCH ERROR:", err);
+        if (!cancel) setLyricsRaw(null);
+      } finally {
+        if (!cancel) setLyricsLoading(false);
+      }
     }
-  }
 
-  load();
-  return () => {
-    cancel = true;
-  };
-}, [track]);
-
-
+    load();
+    return () => {
+      cancel = true;
+    };
+  }, [track]);
 
   // ---------- parse lyrics ----------
   useEffect(() => {
@@ -233,14 +350,40 @@ useEffect(() => {
       return;
     }
 
-    const rawLines = lyricsRaw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const rawLines = lyricsRaw.split(/\r?\n/).map((l) => l.trim());
     const sectionRegex = /^\[(.*?)\]$/;
+    const altSectionRegex = /^(chorus|verse|bridge|refren|zwrotka|vers|intro|outro|pre-chorus|post-chorus)(\s*\d+)?\s*:?\s*$/i;
 
-    const parsed: LyricLine[] = rawLines.map((ln) => {
-      const m = ln.match(sectionRegex);
-      if (m) return { text: m[1], isSection: true };
-      return { text: ln, words: ln.split(/\s+/).filter(Boolean) };
-    });
+    const normalizeSection = (label: string) => {
+      const lower = label.toLowerCase();
+      const numberMatch = lower.match(/\d+/);
+      const suffix = numberMatch ? ` ${numberMatch[0]}` : "";
+
+      if (lower.includes("chorus") || lower.includes("ref")) return `[refren${suffix}]`;
+      if (lower.includes("verse") || lower.includes("zwrotka") || lower.includes("vers")) {
+        return `[wers${suffix}]`;
+      }
+      if (lower.includes("bridge")) return `[bridge${suffix}]`;
+      if (lower.includes("pre-chorus")) return `[pre-refren${suffix}]`;
+      if (lower.includes("post-chorus")) return `[post-refren${suffix}]`;
+      if (lower.includes("intro")) return `[intro${suffix}]`;
+      if (lower.includes("outro")) return `[outro${suffix}]`;
+      return `[${label}]`;
+    };
+
+    const parsed: LyricLine[] = rawLines
+      .map((ln) => {
+        if (!ln) return null;
+        const m = ln.match(sectionRegex);
+        if (m) return { text: normalizeSection(m[1]), isSection: true };
+        const alt = ln.match(altSectionRegex);
+        if (alt) {
+          const label = `${alt[1]}${alt[2] ?? ""}`;
+          return { text: normalizeSection(label), isSection: true };
+        }
+        return { text: ln, words: ln.split(/\s+/).filter(Boolean) };
+      })
+      .filter(Boolean) as LyricLine[];
 
     setLyricsLines(parsed);
   }, [lyricsRaw]);
@@ -354,18 +497,19 @@ useEffect(() => {
     );
   }
 
-  // debug helper
-  console.log("LYRICS RAW:", lyricsRaw);
+  const albumCover = track.albums?.cover_url || FALLBACK_BG;
 
   return (
     <main
       ref={containerRef}
-      className="min-h-screen px-6 py-10"
-      style={{
-        background:
-          "radial-gradient(circle at 30% 10%, rgba(40,0,80,0.08) 0%, rgba(2,2,4,0.94) 60%)",
-      }}
+      className="min-h-screen relative bg-gray-100 text-black dark:bg-[#03060a] dark:text-white"
     >
+      <div
+        className="absolute inset-0 bg-cover bg-center blur-3xl opacity-25 dark:opacity-20 pointer-events-none"
+        style={{ backgroundImage: `url(\"${albumCover}\")` }}
+      />
+      <div className="absolute inset-0 bg-white/50 dark:bg-black/40 pointer-events-none" />
+
       {/* === FULLSCREEN CONCERT MODE === */}
       {fullscreen && (
         <div
@@ -396,41 +540,99 @@ useEffect(() => {
         </div>
       )}
 
-      <div className="max-w-4xl mx-auto">
-        <Link href="/" className="text-blue-500 underline block mb-4">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 py-12">
+        <Link href="/" className="mb-6 inline-block px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20">
           ← Powrót
         </Link>
 
-        {/* Track header */}
-        <div className="bg-white dark:bg-[#0b0d10] p-6 rounded-lg shadow mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{track.title}</h1>
-          <p className="text-gray-600 dark:text-gray-300 text-sm mb-3">{track.artist_name}</p>
+        <div className="mb-10 grid grid-cols-1 gap-6">
+          <div className="w-full p-6 rounded-2xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
+            <div className="flex items-start gap-4">
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <h1 className="text-3xl font-bold">{track.title}</h1>
+                  <span className="text-sm text-gray-600 dark:text-gray-300">•</span>
+                  <span className="text-sm text-gray-600 dark:text-gray-300">Utwór</span>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                  {track.artist_id ? (
+                    <Link
+                      href={`/artist/${track.artist_id}`}
+                      className="text-blue-300 hover:underline"
+                    >
+                      {track.artist_display_name ?? "Artysta"}
+                    </Link>
+                  ) : track.artist_display_name ? (
+                    <span>{track.artist_display_name}</span>
+                  ) : (
+                    "Nieznany artysta"
+                  )}
+                </p>
+                {track.album_id && track.albums?.title && (
+                  <Link
+                    href={`/album/${track.album_id}`}
+                    className="mt-2 inline-block text-sm text-blue-300 hover:underline"
+                  >
+                    Album: {track.albums.title}
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
 
-          {track.spotify_id && (
-            <iframe
-              title="spotify-player"
-              src={`https://open.spotify.com/embed/track/${track.spotify_id}`}
-              width="100%"
-              height="80"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              className="rounded"
-            />
-          )}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            <aside className="h-full">
+              <div className="h-full p-4 rounded-xl bg-white/60 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
+                <h4 className="font-semibold mb-3">Statystyki</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Długość</p>
+                    <p className="text-lg font-bold">
+                      {track.duration
+                        ? `${Math.floor(track.duration / 60)}:${String(track.duration % 60).padStart(2, "0")}`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Nr utworu</p>
+                    <p className="text-lg font-bold">{track.track_number ?? "—"}</p>
+                  </div>
+                </div>
+              </div>
+            </aside>
 
-          <div className="mt-3">
-            <button
-              onClick={enterFullscreen}
-              className="px-3 py-1 bg-purple-600 text-white rounded text-sm"
-            >
-              Pełny ekran (koncert)
-            </button>
+            <section className="lg:col-span-2 h-full">
+              <div className="h-full p-6 rounded-2xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
+                <h3 className="text-xl font-semibold mb-4">Odtwarzacz</h3>
+                {track.spotify_id ? (
+                  <iframe
+                    title="spotify-player"
+                    src={`https://open.spotify.com/embed/track/${track.spotify_id}`}
+                    width="100%"
+                    height="80"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                    className="rounded"
+                  />
+                ) : (
+                  <p className="text-sm text-gray-500">Brak odtwarzacza Spotify.</p>
+                )}
+
+                <div className="mt-4">
+                  <button
+                    onClick={enterFullscreen}
+                    className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm"
+                  >
+                    Pełny ekran (koncert)
+                  </button>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 
-        {/* Lyrics */}
-        <div className="bg-white dark:bg-[#0b0d10] p-4 rounded-lg shadow">
-          <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Tekst piosenki</h2>
+        <div className="p-6 rounded-2xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
+          <h2 className="text-xl font-semibold mb-4">Tekst piosenki</h2>
 
           {lyricsLoading ? (
             <p className="text-gray-400 text-sm">Ładowanie…</p>

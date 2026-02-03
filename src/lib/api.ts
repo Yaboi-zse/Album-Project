@@ -57,7 +57,33 @@ export async function fetchAlbums(filters: AlbumFilters) {
   try {
     const offset = (page - 1) * limit;
     let query = supabase.from("albums").select(`id, title, year, genre, cover_url, artist_id, artists(name)`, { count: "exact" });
-    if (debouncedSearch) query = query.ilike("title", `%${debouncedSearch}%`);
+    if (debouncedSearch) {
+      const { data: artistRows } = await supabase
+        .from("artists")
+        .select("id")
+        .ilike("name", `%${debouncedSearch}%`)
+        .limit(25);
+      const artistIds = (artistRows || []).map((r: { id: number }) => r.id);
+
+      const orParts = [
+        `title.ilike.%${debouncedSearch}%`,
+        `genre.ilike.%${debouncedSearch}%`,
+      ];
+      if (artistIds.length > 0) {
+        orParts.push(`artist_id.in.(${artistIds.join(",")})`);
+      }
+      query = query.or(orParts.join(","));
+    }
+    if (genreFilter) {
+      const genreList = genreFilter
+        .split(",")
+        .map((g: string) => g.trim())
+        .filter(Boolean);
+      if (genreList.length > 0) {
+        const genreOr = genreList.map((g) => `genre.ilike.%${g}%`).join(",");
+        query = query.or(genreOr);
+      }
+    }
     if (yearFrom) query = query.gte("year", parseInt(yearFrom));
     if (yearTo) query = query.lte("year", parseInt(yearTo));
     if (artistFilter) query = query.eq("artist_id", artistFilter);
@@ -96,7 +122,6 @@ export async function fetchAlbums(filters: AlbumFilters) {
       user_rating: userRatings.find((ur) => ur.album_id === a.id) ? Number(userRatings.find((ur) => ur.album_id === a.id).rating) : null
     }));
     if (ratingMin) combined = combined.filter(album => album.avg_rating !== "—" && Number(album.avg_rating) >= Number(ratingMin));
-    if (genreFilter) { const genreList = genreFilter.split(',').map((g: string) => g.trim().toLowerCase()).filter(Boolean); if (genreList.length > 0) combined = combined.filter(album => album.genre && genreList.some(selectedGenre => album.genre!.split(',').map((g: string) => g.trim().toLowerCase()).some(albumGenre => albumGenre.includes(selectedGenre)))); }
     return { albums: combined, total: totalCount ?? 0 };
   } catch (e) {
     console.error("Error in fetchAlbums:", e);

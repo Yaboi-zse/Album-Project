@@ -1,10 +1,20 @@
-// src/hooks/useFilters.ts
+﻿// src/hooks/useFilters.ts
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 
+type FilterState = {
+  search: string;
+  genreFilter: string;
+  yearFrom: string;
+  yearTo: string;
+  ratingMin: number | "";
+  sortBy: string;
+  page: number;
+};
+
 export function useFilters() {
   const router = useRouter();
-  
+
   const [search, setSearch] = useState("");
   const [genreFilter, setGenreFilter] = useState("");
   const [yearFrom, setYearFrom] = useState("");
@@ -13,54 +23,57 @@ export function useFilters() {
   const [sortBy, setSortBy] = useState("title");
   const [page, setPage] = useState(1);
 
-  // ODCZYTUJ URL ZAWSZE gdy się zmienia - USUŃ isInitialLoad
+  // Zawsze aktualizuj stan z URL (gdy nawigacja zmienia query)
   useEffect(() => {
-    if (router.isReady) {
-      const q = router.query;
-      
-      console.log("🔄 useFilters updating state from URL:", q);
-      
-      // Zawsze aktualizuj stan z URL
-      if (q.q !== undefined) setSearch(String(q.q));
-      else setSearch("");
-      
-      if (q.genre !== undefined) setGenreFilter(String(q.genre));
-      else setGenreFilter("");
-      
-      if (q.yearFrom !== undefined) setYearFrom(String(q.yearFrom));
-      else setYearFrom("");
-      
-      if (q.yearTo !== undefined) setYearTo(String(q.yearTo));
-      else setYearTo("");
-      
-      if (q.rmin !== undefined) setRatingMin(Number(q.rmin));
-      else setRatingMin("");
-      
-      if (q.page !== undefined) setPage(Number(q.page));
-      else setPage(1);
-      
-      if (q.sort !== undefined) setSortBy(String(q.sort));
-      else setSortBy("title");
-    }
-  }, [router.query, router.isReady]); // USUŃ isInitialLoad
+    if (!router.isReady) return;
+    const q = router.query;
 
-  // Zastosuj filtry do URL
-  const applyFiltersToURL = () => {
+    if (q.q !== undefined) setSearch(String(q.q));
+    else setSearch("");
+
+    if (q.genre !== undefined) setGenreFilter(String(q.genre));
+    else setGenreFilter("");
+
+    if (q.yearFrom !== undefined) setYearFrom(String(q.yearFrom));
+    else setYearFrom("");
+
+    if (q.yearTo !== undefined) setYearTo(String(q.yearTo));
+    else setYearTo("");
+
+    if (q.rmin !== undefined) setRatingMin(Number(q.rmin));
+    else setRatingMin("");
+
+    if (q.page !== undefined) setPage(Number(q.page));
+    else setPage(1);
+
+    if (q.sort !== undefined) setSortBy(String(q.sort));
+    else setSortBy("title");
+  }, [router.query, router.isReady]);
+
+  const applyFiltersToURL = (override: Partial<FilterState> = {}) => {
+    const s: FilterState = {
+      search,
+      genreFilter,
+      yearFrom,
+      yearTo,
+      ratingMin,
+      sortBy,
+      page,
+      ...override,
+    };
+
     const query: any = {};
+    if (s.search.trim()) query.q = s.search.trim();
+    if (s.genreFilter) query.genre = s.genreFilter;
+    if (s.yearFrom) query.yearFrom = s.yearFrom;
+    if (s.yearTo) query.yearTo = s.yearTo;
+    if (s.ratingMin !== "") query.rmin = String(s.ratingMin);
+    if (s.sortBy !== "title") query.sort = s.sortBy;
+    if (s.page > 1) query.page = String(s.page);
 
-    if (search.trim()) query.q = search.trim();
-    if (genreFilter) query.genre = genreFilter;
-    if (yearFrom) query.yearFrom = yearFrom;
-    if (yearTo) query.yearTo = yearTo;
-    if (ratingMin !== "") query.rmin = String(ratingMin);
-    if (sortBy !== "title") query.sort = sortBy;
-    if (page > 1) query.page = String(page);
-
-    console.log("💾 useFilters saving to URL:", query);
     router.push({ pathname: "/", query }, undefined, { shallow: true });
   };
 
-  // Wyczyść wszystkie filtry
   const clearAllFilters = () => {
     setSearch("");
     setGenreFilter("");
@@ -69,13 +82,11 @@ export function useFilters() {
     setRatingMin("");
     setPage(1);
     setSortBy("title");
-    
-    console.log("🧹 useFilters clearing all filters");
+
     router.push("/", undefined, { shallow: true });
   };
 
   return {
-    // Stany
     search,
     setSearch,
     genreFilter,
@@ -90,9 +101,7 @@ export function useFilters() {
     setSortBy,
     page,
     setPage,
-    
-    // Akcje
     applyFiltersToURL,
-    clearAllFilters
+    clearAllFilters,
   };
 }

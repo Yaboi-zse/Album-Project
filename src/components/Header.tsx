@@ -1,4 +1,4 @@
-// src/components/Header.tsx
+﻿// src/components/Header.tsx
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -55,9 +55,10 @@ export default function Header() {
   const genres = genreFilter ? genreFilter.split(",").map(g => g.trim()).filter(Boolean) : [];
 
   // SEARCH SUGGESTIONS
-  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [searchSuggestions, setSearchSuggestions] = useState<Array<{ label: string; type: "album" | "genre" | "artist" | "track"; id?: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const suggestionDebounceRef = useRef<number | null>(null);
 
   // FILTER PRESETS (persisted to localStorage)
@@ -176,18 +177,52 @@ export default function Header() {
   const fetchSearchSuggestions = async (q: string) => {
     try {
       if (!q || q.trim().length < 2) {
-        setSearchSuggestions([]);
         setShowSuggestions(false);
         return;
       }
-      const { data } = await supabase
-        .from("albums")
-        .select("title")
-        .ilike("title", `%${q}%`)
-        .limit(5);
+      const [{ data: albums }, { data: artists }, { data: tracks }] = await Promise.all([
+        supabase
+          .from("albums")
+          .select("title, genre")
+          .or(`title.ilike.%${q}%,genre.ilike.%${q}%`)
+          .limit(8),
+        supabase
+          .from("artists")
+          .select("id, name")
+          .ilike("name", `%${q}%`)
+          .limit(5),
+        supabase
+          .from("tracks")
+          .select("id, title, artist_name")
+          .or(`title.ilike.%${q}%,artist_name.ilike.%${q}%`)
+          .limit(6),
+      ]);
 
-      if (data) {
-        setSearchSuggestions(Array.from(new Set(data.map((d: any) => d.title))));
+      if (albums || artists || tracks) {
+        const albumSuggestions = (albums || []).flatMap((d: any) => [
+          d.title ? { label: d.title, type: "album" as const } : null,
+          d.genre ? { label: d.genre, type: "genre" as const } : null,
+        ]).filter(Boolean) as Array<{ label: string; type: "album" | "genre" }>;
+
+        const artistSuggestions = (artists || []).map((a: any) => ({
+          label: a.name,
+          type: "artist" as const,
+          id: a.id as string,
+        }));
+
+        const trackSuggestions = (tracks || []).map((t: any) => ({
+          label: `${t.title}${t.artist_name ? ` — ${t.artist_name}` : ""}`,
+          type: "track" as const,
+          id: t.id as string,
+        }));
+
+        const dedup = new Map<string, { label: string; type: "album" | "genre" | "artist" | "track"; id?: string }>();
+        [...albumSuggestions, ...artistSuggestions, ...trackSuggestions].forEach((s) => {
+          const key = `${s.type}:${s.label}:${s.id ?? ""}`;
+          if (!dedup.has(key)) dedup.set(key, s);
+        });
+
+        setSearchSuggestions(Array.from(dedup.values()));
         setShowSuggestions(true);
       }
     } catch (err) {
@@ -212,20 +247,27 @@ export default function Header() {
   // click outside suggestions to close
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!suggestionsRef.current) return;
-      if (!suggestionsRef.current.contains(e.target as Node)) {
-        setShowSuggestions(false);
-      }
+      const target = e.target as Node;
+      if (searchBoxRef.current && searchBoxRef.current.contains(target)) return;
+      if (suggestionsRef.current && suggestionsRef.current.contains(target)) return;
+      setShowSuggestions(false);
     };
-    document.addEventListener("click", onDoc);
-    return () => document.removeEventListener("click", onDoc);
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const handleSuggestionSelect = (title: string) => {
-    setSearch(title);
+  const handleSuggestionSelect = (s: { label: string; type: "album" | "genre" | "artist" | "track"; id?: string }) => {
     setShowSuggestions(false);
-    // apply immediately
-    applyFiltersToURL();
+    if (s.type === "artist" && s.id) {
+      router.push(`/artist/${s.id}`);
+      return;
+    }
+    if (s.type === "track" && s.id) {
+      router.push(`/track/${s.id}`);
+      return;
+    }
+    setSearch(s.label);
+    applyFiltersToURL({ search: s.label, page: 1 });
   };
 
   // -----------------------
@@ -240,12 +282,12 @@ export default function Header() {
   }, [filterPresets]);
 
   const applyPreset = (preset: { name: string; genres: string[]; years: string }) => {
-    setGenreFilter(preset.genres.join(","));
+    const nextGenres = preset.genres.join(",");
+    setGenreFilter(nextGenres);
     const [from, to] = preset.years.split("-");
     setYearFrom(from ?? "");
     setYearTo(to ?? "");
-    // apply to URL
-    applyFiltersToURL();
+    applyFiltersToURL({ genreFilter: nextGenres, yearFrom: from ?? "", yearTo: to ?? "", page: 1 });
     setShowFilters(false);
   };
 
@@ -271,12 +313,12 @@ export default function Header() {
   const applyQuickNewReleases = () => {
     setYearFrom("2020");
     setYearTo("2024");
-    applyFiltersToURL();
+    applyFiltersToURL({ yearFrom: "2020", yearTo: "2024", page: 1 });
   };
 
   const applyQuickTopRatings = () => {
     setRatingMin(8);
-    applyFiltersToURL();
+    applyFiltersToURL({ ratingMin: 8, page: 1 });
   };
 
   // -----------------------
@@ -284,7 +326,9 @@ export default function Header() {
   // -----------------------
   const handleGenreToggle = (g: string) => {
     const newGenres = genres.includes(g) ? genres.filter(x => x !== g) : [...genres, g];
-    setGenreFilter(newGenres.join(","));
+    const nextGenres = newGenres.join(",");
+    setGenreFilter(nextGenres);
+    applyFiltersToURL({ genreFilter: nextGenres, page: 1 });
   };
 
   // -----------------------
@@ -292,7 +336,6 @@ export default function Header() {
   // -----------------------
   const clearSearch = () => {
     setSearch("");
-    setSearchSuggestions([]);
     setShowSuggestions(false);
 
     // update URL via hook
@@ -374,18 +417,18 @@ export default function Header() {
 
             {/* SEARCH + FILTERS */}
             <div className="flex-1 flex items-center justify-center px-4">
-              <div className="w-full max-w-2xl relative">
+              <div className="w-full max-w-2xl relative" ref={searchBoxRef}>
                 {/* Search input */}
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
-                    placeholder="Szukaj albumów..."
+                    placeholder="Szukaj albumów lub utworów..."
                     value={search}
                     onChange={(e) => handleSearchInputChange(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                     onFocus={() => { if (searchSuggestions.length > 0) setShowSuggestions(true); }}
                     className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-                    aria-label="Szukaj albumów"
+                    aria-label="Szukaj albumów lub utworów"
                   />
 
                   {/* clear */}
@@ -394,9 +437,7 @@ export default function Header() {
                       onClick={clearSearch}
                       className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-[#121617] transition"
                       title="Wyczyść"
-                    >
-                      ✕
-                    </button>
+                    >✖</button>
                   )}
 
                   {/* apply */}
@@ -422,14 +463,30 @@ export default function Header() {
                     <span>⚙</span>
                     <span className="hidden sm:inline">Filtry</span>
 
-                    {hasActiveFilters && (
-                      <div className="flex gap-1 items-center ml-2">
-                        {search && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: NEON.blue, color: "#001" }}>🔍</span>}
-                        {genres.length > 0 && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.purple, color: "#001" }}>{genres.length}</span>}
-                        {(yearFrom || yearTo) && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.cyan, color: "#001" }}>📅</span>}
-                        {ratingMin && <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: "#ffca28", color: "#001" }}>⭐</span>}
-                      </div>
-                    )}
+                      {hasActiveFilters && (
+                        <div className="flex gap-1 items-center ml-2">
+                          {search && (
+                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: NEON.blue, color: "#001" }}>
+                              🔍
+                            </span>
+                          )}
+                          {genres.length > 0 && (
+                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.purple, color: "#001" }}>
+                              🎵 {genres.length}
+                            </span>
+                          )}
+                          {(yearFrom || yearTo) && (
+                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.cyan, color: "#001" }}>
+                              📅
+                            </span>
+                          )}
+                          {ratingMin && (
+                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: "#ffca28", color: "#001" }}>
+                              ⭐
+                            </span>
+                          )}
+                        </div>
+                      )}
                   </button>
                 </div>
 
@@ -447,10 +504,20 @@ export default function Header() {
                           {searchSuggestions.map((sug, i) => (
                             <li key={i}>
                               <button
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => handleSuggestionSelect(sug)}
                                 className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-[#0f1418] transition"
                               >
-                                {sug}
+                                {sug.label}
+                                <span className="ml-2 text-[10px] text-gray-400">
+                                  {sug.type === "artist"
+                                    ? "artysta"
+                                    : sug.type === "genre"
+                                    ? "gatunek"
+                                    : sug.type === "track"
+                                    ? "utwór"
+                                    : "album"}
+                                </span>
                               </button>
                             </li>
                           ))}
@@ -499,8 +566,7 @@ export default function Header() {
                   {/* LEFT: Genres + quick filters + presets */}
                   <div className="lg:col-span-2">
                     <div className="flex items-center justify-between mb-3">
-                      <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">
-                        🎵 Gatunki {genres.length > 0 && `(${genres.length} wybranych)`}
+                      <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">🎵 Gatunki {genres.length > 0 && `(${genres.length} wybranych)`}
                       </p>
 
                       <div className="relative">
@@ -597,15 +663,15 @@ export default function Header() {
                                 color: NEON.purple,
                               }}
                             >
-                              🎵 {preset.name}
+                                🎵 {preset.name}
                             </button>
-                            <button
-                              onClick={() => deletePreset(idx)}
-                              className="text-xs px-2 py-1 rounded-md text-red-500"
-                              title="Usuń preset"
-                            >
-                              ✕
-                            </button>
+                              <button
+                                onClick={() => deletePreset(idx)}
+                                className="text-xs px-2 py-1 rounded-md text-red-500"
+                                title="Usuń preset"
+                              >
+                                ✖
+                              </button>
                           </div>
                         ))}
                       </div>
@@ -629,11 +695,11 @@ export default function Header() {
                           <div className="flex gap-2">
                             <button
                               onClick={() => {
-                                // quick save from current selection if genres not provided
-                                const g = newPresetGenres.trim().length ? newPresetGenres.split(",").map(s => s.trim()).filter(Boolean) : genres;
+                                const g = newPresetGenres.trim().length
+                                  ? newPresetGenres.split(",").map(s => s.trim()).filter(Boolean)
+                                  : genres;
                                 const name = newPresetName.trim() || `Preset ${filterPresets.length + 1}`;
                                 if (g.length === 0) {
-                                  // fallback: deny empty presets
                                   return alert("Podaj gatunki lub wybierz je z listy.");
                                 }
                                 setFilterPresets(p => [{ name, genres: g, years: `${yearFrom || ""}-${yearTo || ""}` }, ...p].slice(0, 12));
@@ -778,3 +844,6 @@ export default function Header() {
     </header>
   );
 }
+
+
+

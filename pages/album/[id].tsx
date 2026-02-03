@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { RATING_COLORS } from "../../styles/theme";
 
 const FALLBACK_BG = "/mnt/data/e4520bdf-552d-47a4-93b6-d3df905166b3.png";
 
@@ -32,8 +33,17 @@ export default function AlbumDetails() {
   const [userRating, setUserRating] = useState<number | null>(null);
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [hoveredRatingValue, setHoveredRatingValue] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(true);
+
+  const cleanDescription = (text?: string) => {
+    if (!text) return "";
+    return text
+      .replace(/https?:\/\/open\.spotify\.com\/album\/[A-Za-z0-9]+(\?\S+)?/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  };
 
   // --------- Fetch Spotify tracks ---------
   const fetchSpotifyTracks = useCallback(async (spotifyAlbumId?: string) => {
@@ -61,7 +71,7 @@ export default function AlbumDetails() {
           `
           id, title, year, genre, description, cover_url, spotify_id,
           artist_id, artist_name,
-          artists(name)
+          artists(id, name)
         `
         )
         .eq("id", albumId)
@@ -73,7 +83,11 @@ export default function AlbumDetails() {
         return;
       }
 
-      setAlbum(data);
+      const artistName =
+        data.artist_name ?? (data.artists && (data.artists as any).name) ?? null;
+      const artistId =
+        data.artist_id ?? (data.artists && (data.artists as any).id) ?? null;
+      setAlbum({ ...data, artist_name: artistName, artist_id: artistId });
 
       if (data.spotify_id) fetchSpotifyTracks(data.spotify_id);
 
@@ -327,6 +341,43 @@ return (
                 {isFavorite ? "❤️ Ulubione" : "Ulubione"}
               </button>
             </div>
+
+            <div className="mt-4">
+              <p className="text-sm mb-2">Twoja ocena:</p>
+              <div
+                className="grid grid-cols-10 gap-1.5 w-full"
+                onMouseLeave={() => setHoveredRatingValue(null)}
+              >
+                {Array.from({ length: 10 }).map((_, idx) => {
+                  const value = idx + 1;
+                  const isActive = userRating === value;
+                  const isHighlighted = hoveredRatingValue !== null && value <= hoveredRatingValue;
+
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onMouseEnter={() => setHoveredRatingValue(value)}
+                      onClick={() => handleRating(value)}
+                      style={{
+                        background: isActive
+                          ? RATING_COLORS[value]
+                          : isHighlighted
+                          ? `${RATING_COLORS[value]}33`
+                          : "rgba(255,255,255,0.08)",
+                        border: `1px solid ${isActive || isHighlighted ? RATING_COLORS[value] : "rgba(255,255,255,0.2)"}`,
+                        transform: isActive ? "scale(1.15)" : isHighlighted ? "scale(1.08)" : "scale(1)",
+                        boxShadow: isActive ? `0 0 12px ${RATING_COLORS[value]}` : "none",
+                        transition: "all 100ms ease",
+                      }}
+                      className="aspect-square rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -335,10 +386,13 @@ return (
 
           {/* DESCRIPTION */}
           <div className="p-6 rounded-2xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
-            <h1 className="text-3xl font-bold">{album.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-3xl font-bold">{album.title}</h1>
+
+            </div>
 
             <p className="text-sm text-gray-600 dark:text-gray-300 mt-2 whitespace-pre-line">
-              {album.description}
+              {cleanDescription(album.description)}
             </p>
           </div>
 

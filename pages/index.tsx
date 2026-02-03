@@ -11,7 +11,7 @@ import { useAlbumData } from '../src/hooks/useAlbumData';
 import { Top10Slider } from '../src/components/Top10Slider';
 import { RecommendationsSidebar } from '../src/components/RecommendationsSidebar';
 import { AlbumCards } from '../src/components/AlbumCards';
-
+import { Analytics } from "@vercel/analytics/next"
 const ALBUMS_PER_PAGE = 15;
 
 export default function HomePage() {
