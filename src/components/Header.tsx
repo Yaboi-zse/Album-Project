@@ -55,7 +55,8 @@ export default function Header() {
   const genres = genreFilter ? genreFilter.split(",").map(g => g.trim()).filter(Boolean) : [];
 
   // SEARCH SUGGESTIONS
-  const [searchSuggestions, setSearchSuggestions] = useState<Array<{ label: string; type: "album" | "genre" | "artist" | "track"; id?: string }>>([]);
+  type Suggestion = { label: string; type: "album" | "genre" | "artist" | "track"; id?: string };
+  const [searchSuggestions, setSearchSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -199,18 +200,20 @@ export default function Header() {
       ]);
 
       if (albums || artists || tracks) {
-        const albumSuggestions = (albums || []).flatMap((d: any) => [
-          d.title ? { label: d.title, type: "album" as const } : null,
-          d.genre ? { label: d.genre, type: "genre" as const } : null,
-        ]).filter(Boolean) as Array<{ label: string; type: "album" | "genre" }>;
+        const albumSuggestions: Suggestion[] = (albums || [])
+          .flatMap((d: any) => [
+            d.title ? { label: d.title, type: "album" as const, id: undefined } : null,
+            d.genre ? { label: d.genre, type: "genre" as const, id: undefined } : null,
+          ])
+          .filter(Boolean) as Suggestion[];
 
-        const artistSuggestions = (artists || []).map((a: any) => ({
+        const artistSuggestions: Suggestion[] = (artists || []).map((a: any) => ({
           label: a.name,
           type: "artist" as const,
           id: a.id as string,
         }));
 
-        const trackSuggestions = (tracks || []).map((t: any) => ({
+        const trackSuggestions: Suggestion[] = (tracks || []).map((t: any) => ({
           label: `${t.title}${t.artist_name ? ` — ${t.artist_name}` : ""}`,
           type: "track" as const,
           id: t.id as string,
@@ -256,7 +259,7 @@ export default function Header() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const handleSuggestionSelect = (s: { label: string; type: "album" | "genre" | "artist" | "track"; id?: string }) => {
+  const handleSuggestionSelect = (s: Suggestion) => {
     setShowSuggestions(false);
     if (s.type === "artist" && s.id) {
       router.push(`/artist/${s.id}`);
