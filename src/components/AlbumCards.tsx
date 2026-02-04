@@ -79,8 +79,9 @@ export function AlbumCards({
     <motion.div
       className="relative w-full max-w-[240px] rounded-xl overflow-visible cursor-pointer"
       style={{
-        background: "linear-gradient(180deg, rgba(10,12,18,0.85), rgba(8,10,14,0.7))",
-        border: "1px solid rgba(255,255,255,0.02)",
+        background: "linear-gradient(180deg, rgba(93, 93, 136, 0.63), rgba(8,10,14,0.7))",
+        border: "1px solid rgba(107, 103, 103, 0.88)",
+        boxShadow: "0 10px 24px rgb(255, 252, 252), 0 0 0 1px rgb(255, 245, 245) inset",
         transition: "box-shadow 160ms ease, transform 160ms ease",
       }}
       initial={{ y: 0 }}

@@ -23,6 +23,9 @@ export default function ArtistPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [allAlbumsPage, setAllAlbumsPage] = useState(0);
+  const [avgArtistRating, setAvgArtistRating] = useState<number | null>(null);
+  const [ratingsCount, setRatingsCount] = useState(0);
+  const [favoritesCount, setFavoritesCount] = useState(0);
 
   const loadArtistAndAlbums = useCallback(async () => {
     if (!artistId) return;
@@ -43,7 +46,35 @@ export default function ArtistPage() {
       limit: 50,
       artistFilter: artistId,
     });
-    setAlbums(result.albums);
+    const artistAlbums = result.albums || [];
+    setAlbums(artistAlbums);
+
+    if (artistAlbums.length > 0) {
+      const albumIds = artistAlbums.map((a: any) => a.id);
+      const { data: ratingRows } = await supabase
+        .from("ratings")
+        .select("album_id, rating")
+        .in("album_id", albumIds);
+
+      const ratings = (ratingRows || []).map((r: any) => Number(r.rating)).filter((n) => !Number.isNaN(n));
+      if (ratings.length > 0) {
+        const avg = ratings.reduce((s, n) => s + n, 0) / ratings.length;
+        setAvgArtistRating(Number(avg.toFixed(1)));
+      } else {
+        setAvgArtistRating(null);
+      }
+      setRatingsCount(ratings.length);
+
+      const { data: favRows } = await supabase
+        .from("favorites")
+        .select("album_id")
+        .in("album_id", albumIds);
+      setFavoritesCount(favRows?.length ?? 0);
+    } else {
+      setAvgArtistRating(null);
+      setRatingsCount(0);
+      setFavoritesCount(0);
+    }
     setLoading(false);
   }, [artistId]);
 
@@ -133,6 +164,18 @@ export default function ArtistPage() {
                   <p className="text-gray-500 dark:text-gray-400">Albumy</p>
                   <p className="text-lg font-bold">{albums.length}</p>
                 </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Średnia ocena</p>
+                  <p className="text-lg font-bold">{avgArtistRating ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Oceny</p>
+                  <p className="text-lg font-bold">{ratingsCount}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Ulubione</p>
+                  <p className="text-lg font-bold">{favoritesCount}</p>
+                </div>
               </div>
             </div>
           </aside>
@@ -152,7 +195,7 @@ export default function ArtistPage() {
                     style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
                   >
                     {[...albums]
-                      .sort((a, b) => Number(b.avg_rating) - Number(a.avg_rating))
+                      .sort((a, b) => Number(b.avg_rating ?? 0) - Number(a.avg_rating ?? 0))
                       .slice(0, 3)
                       .map((album) => (
                         <AlbumCards

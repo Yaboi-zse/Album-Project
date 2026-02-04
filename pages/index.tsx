@@ -52,13 +52,17 @@ export default function HomePage() {
 
   return (
     <main
-      className={`pt-24 pb-10 min-h-screen transition-colors duration-300
-        bg-white text-black
+      className={`pt-24 pb-10 min-h-screen transition-colors duration-300 relative overflow-hidden
+        bg-[#f2f5fa] text-black
         dark:bg-[#03060a] dark:text-[#e6eef8]
-        dark:bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(138,43,226,0.06),transparent),radial-gradient(1000px_500px_at_90%_90%,rgba(0,234,255,0.04),transparent),#03060a]
       `}
     >
-      <div className="w-full px-4">
+      {/* Subtelne tło żeby kafelki się wyróżniały */}
+      <div className="absolute inset-0 bg-[radial-gradient(900px_500px_at_10%_15%,rgba(120,160,255,0.08),transparent),radial-gradient(900px_500px_at_90%_80%,rgba(0,234,255,0.06),transparent)]" />
+      <div className="absolute inset-0 dark:bg-[radial-gradient(1200px_700px_at_12%_10%,rgba(138,43,226,0.08),transparent),radial-gradient(1000px_600px_at_88%_85%,rgba(0,234,255,0.05),transparent),#03060a]" />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-transparent to-white/20 dark:from-black/40 dark:to-black/20" />
+
+      <div className="relative z-10 w-full px-4">
         {/* --- SEKCJA TOP 10 ALBUMÓW --- */}
         <Top10Slider
           albums={top10Albums}
@@ -67,16 +71,13 @@ export default function HomePage() {
         />
 
         {/* --- GŁÓWNY LAYOUT: LISTA ALBUMÓW + PANEL BOCZNY --- */}
-        <section className="mb-12 flex flex-col lg:flex-row gap-8 w-full">
+        <section className="mb-12 flex flex-col lg:flex-row lg:items-start gap-8 w-full mt-4">
           {/* LEWA STRONA – SIATKA ALBUMÓW */}
           <div className="flex-1">
             {loading ? (
               <div className="py-24 text-center text-gray-400">Ładowanie albumów...</div>
             ) : albums.length > 0 ? (
-              <div
-                className="grid gap-x-6 gap-y-16 justify-items-center sm:justify-items-start"
-                style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
-              >
+              <div className="grid gap-x-6 gap-y-16 justify-items-start grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {albums.map((album) => (
                   <AlbumCards
                     key={album.id}
@@ -135,6 +136,21 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {/* FOOTER */}
+      <footer className="relative z-10 mt-16 border-t border-white/10 dark:border-white/10">
+        <div className="max-w-7xl mx-auto px-4 py-8 text-sm text-gray-500 dark:text-gray-400 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="flex flex-wrap gap-4">
+            <a href="#" className="hover:text-gray-700 dark:hover:text-gray-200 transition">O nas</a>
+            <a href="#" className="hover:text-gray-700 dark:hover:text-gray-200 transition">Regulamin</a>
+            <a href="#" className="hover:text-gray-700 dark:hover:text-gray-200 transition">Prywatność</a>
+            <a href="#" className="hover:text-gray-700 dark:hover:text-gray-200 transition">Kontakt</a>
+          </div>
+          <div className="text-xs">
+            Strona została wykonana przez Yaboi/Mikołaj Misiak
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }

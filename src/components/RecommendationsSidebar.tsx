@@ -1,15 +1,15 @@
-// src/components/RecommendationsSidebar.tsx
+﻿// src/components/RecommendationsSidebar.tsx
 
 import React from 'react';
 import { useRouter } from 'next/router';
 
-// Definicja typów dla propsów
+// Definicja typĂłw dla propsĂłw
 interface Album {
   id: string | number;
   title: string;
   cover_url: string;
   artists?: { name: string; } | null;
-  artist_name?: string; // Może pochodzić z różnych źródeł
+  artist_name?: string; // MoĹĽe pochodziÄ‡ z rĂłĹĽnych ĹşrĂłdeĹ‚
   genre?: string | null;
 }
 
@@ -42,10 +42,16 @@ export function RecommendationsSidebar({ newReleases, recommendations, topAlbums
   };
 
   return (
-    <aside className="hidden lg:block lg:w-[350px] xl:w-[400px] space-y-8 sticky top-28 self-start">
+    <aside className="hidden lg:block lg:w-[350px] xl:w-[400px] space-y-8 sticky top-20 self-start -mt-2">
       {/* NOWE WYDANIA */}
-      <div className="p-4 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-black/20">
-        <h3 className="text-lg font-bold mb-4">🆕 Nowe wydania</h3>
+      <div
+        className="p-4 rounded-xl bg-white/50 dark:bg-black/20"
+        style={{
+          border: "1px solid rgba(107, 103, 103, 0.88)",
+          boxShadow: "0 10px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
+        }}
+      >
+        <h3 className="text-lg font-bold mb-4">⬆ Nowe wydania</h3>
         {newReleases.length === 0 
             ? <p className="text-gray-500 dark:text-gray-400 text-sm">Brak nowości.</p>
             : newReleases.slice(0, 5).map(renderAlbumItem)
@@ -53,7 +59,13 @@ export function RecommendationsSidebar({ newReleases, recommendations, topAlbums
       </div>
 
       {/* REKOMENDACJE */}
-      <div className="p-4 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-black/20">
+      <div
+        className="p-4 rounded-xl bg-white/50 dark:bg-black/20"
+        style={{
+          border: "1px solid rgba(107, 103, 103, 0.88)",
+          boxShadow: "0 10px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
+        }}
+      >
         <h3 className="text-lg font-bold mb-4">✨ Dla Ciebie</h3>
         {recommendations.length === 0 
             ? <p className="text-gray-500 dark:text-gray-400 text-sm">Oceń kilka albumów, aby otrzymać rekomendacje.</p>
@@ -62,7 +74,13 @@ export function RecommendationsSidebar({ newReleases, recommendations, topAlbums
       </div>
 
       {/* POPULARNE DZISIAJ */}
-      <div className="p-4 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-black/20">
+      <div
+        className="p-4 rounded-xl bg-white/50 dark:bg-black/20"
+        style={{
+          border: "1px solid rgba(107, 103, 103, 0.88)",
+          boxShadow: "0 10px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
+        }}
+      >
         <h3 className="text-lg font-bold mb-4">🔥 Popularne dziś</h3>
         {topAlbums.length === 0
             ? <p className="text-gray-500 dark:text-gray-400 text-sm">Brak popularnych albumów.</p>
@@ -72,3 +90,4 @@ export function RecommendationsSidebar({ newReleases, recommendations, topAlbums
     </aside>
   );
 }
+
