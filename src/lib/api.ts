@@ -58,18 +58,42 @@ export async function fetchAlbums(filters: AlbumFilters) {
     const offset = (page - 1) * limit;
     let query = supabase.from("albums").select(`id, title, year, genre, cover_url, artist_id, artists(name)`, { count: "exact" });
     if (debouncedSearch) {
+      const normalizeQuery = (value: string) =>
+        value
+          .replace(/\(feat\.[^)]*\)?/gi, "")
+          .replace(/\(ft\.[^)]*\)?/gi, "")
+          .replace(/\[feat\.[^\]]*\]?/gi, "")
+          .replace(/\[ft\.[^\]]*\]?/gi, "")
+          .replace(/feat\.[^,)]*/gi, "")
+          .replace(/ft\.[^,)]*/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const normalized = normalizeQuery(debouncedSearch);
+      const noCloseParen = debouncedSearch.replace(/\)/g, "");
+      const safeSearch = debouncedSearch.replace(/[()]/g, "");
+      const artistSearch = normalized || safeSearch || noCloseParen || debouncedSearch;
+      const hasFeat = /\b(feat\.|ft\.)/i.test(debouncedSearch);
+
       const { data: artistRows } = await supabase
         .from("artists")
         .select("id")
-        .ilike("name", `%${debouncedSearch}%`)
+        .ilike("name", `%${artistSearch}%`)
         .limit(25);
       const artistIds = (artistRows || []).map((r: { id: number }) => r.id);
 
       const orParts = [
-        `title.ilike.%${debouncedSearch}%`,
-        `genre.ilike.%${debouncedSearch}%`,
+        `title.ilike.%${safeSearch || debouncedSearch}%`,
       ];
-      if (artistIds.length > 0) {
+      if (!hasFeat) {
+        orParts.push(`genre.ilike.%${safeSearch || debouncedSearch}%`);
+      }
+      if (!hasFeat && normalized && normalized !== debouncedSearch) {
+        orParts.push(`title.ilike.%${normalized}%`);
+      }
+      if (noCloseParen && noCloseParen !== debouncedSearch) {
+        orParts.push(`title.ilike.%${noCloseParen}%`);
+      }
+      if (!hasFeat && artistIds.length > 0) {
         orParts.push(`artist_id.in.(${artistIds.join(",")})`);
       }
       query = query.or(orParts.join(","));

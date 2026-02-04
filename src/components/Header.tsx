@@ -55,7 +55,14 @@ export default function Header() {
   const genres = genreFilter ? genreFilter.split(",").map(g => g.trim()).filter(Boolean) : [];
 
   // SEARCH SUGGESTIONS
-  type Suggestion = { label: string; type: "album" | "genre" | "artist" | "track"; id?: string };
+  type Suggestion = {
+    label: string;
+    type: "album" | "artist" | "track";
+    id?: string;
+    primaryLabel?: string;
+    artist_name?: string | null;
+    subLabel?: string;
+  };
   const [searchSuggestions, setSearchSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -175,57 +182,195 @@ export default function Header() {
   // -----------------------
   // SEARCH SUGGESTIONS (debounced)
   // -----------------------
+  const pluralizeAlbums = (count: number) => {
+    if (count === 1) return "1 album";
+    if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) {
+      return `${count} albumy`;
+    }
+    return `${count} albumów`;
+  };
+
+  const normalizeQuery = (value: string) =>
+    value
+      .replace(/\(feat\.[^)]*\)?/gi, "")
+      .replace(/\(ft\.[^)]*\)?/gi, "")
+      .replace(/\[feat\.[^\]]*\]?/gi, "")
+      .replace(/\[ft\.[^\]]*\]?/gi, "")
+      .replace(/feat\.[^,)]*/gi, "")
+      .replace(/ft\.[^,)]*/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
   const fetchSearchSuggestions = async (q: string) => {
     try {
       if (!q || q.trim().length < 2) {
+        setSearchSuggestions([]);
         setShowSuggestions(false);
         return;
       }
+      const normalizedQ = normalizeQuery(q);
+      const noCloseParenQ = q.replace(/\)/g, "");
+      const qLike = `%${q}%`;
+      const qLikeNorm = normalizedQ && normalizedQ !== q ? `%${normalizedQ}%` : null;
+      const qLikeNoClose = noCloseParenQ !== q ? `%${noCloseParenQ}%` : null;
+
       const [{ data: albums }, { data: artists }, { data: tracks }] = await Promise.all([
         supabase
           .from("albums")
-          .select("title, genre")
-          .or(`title.ilike.%${q}%,genre.ilike.%${q}%`)
+          .select("title, artist_name, artists(name)")
+          .or(
+            qLikeNorm || qLikeNoClose
+              ? `title.ilike.${qLike},artist_name.ilike.${qLike}` +
+                (qLikeNorm ? `,title.ilike.${qLikeNorm}` : "") +
+                (qLikeNoClose ? `,title.ilike.${qLikeNoClose}` : "")
+              : `title.ilike.${qLike},artist_name.ilike.${qLike}`
+          )
           .limit(8),
         supabase
           .from("artists")
           .select("id, name")
-          .ilike("name", `%${q}%`)
+          .ilike("name", qLike)
           .limit(5),
         supabase
           .from("tracks")
-          .select("id, title, artist_name")
-          .or(`title.ilike.%${q}%,artist_name.ilike.%${q}%`)
+          .select("id, title, artist_name, albums(artist_name, artists(name))")
+          .or(
+            qLikeNorm || qLikeNoClose
+              ? `title.ilike.${qLike},artist_name.ilike.${qLike}` +
+                (qLikeNorm ? `,title.ilike.${qLikeNorm}` : "") +
+                (qLikeNoClose ? `,title.ilike.${qLikeNoClose}` : "")
+              : `title.ilike.${qLike},artist_name.ilike.${qLike}`
+          )
           .limit(6),
       ]);
 
       if (albums || artists || tracks) {
-        const albumSuggestions: Suggestion[] = (albums || [])
-          .flatMap((d: any) => [
-            d.title ? { label: d.title, type: "album" as const, id: undefined } : null,
-            d.genre ? { label: d.genre, type: "genre" as const, id: undefined } : null,
-          ])
-          .filter(Boolean) as Suggestion[];
+        const qLower = q.trim().toLowerCase();
+        const qLowerNorm = normalizeQuery(q).toLowerCase();
+        const exactArtist = (artists || []).find(
+          (a: any) => {
+            const n = String(a.name).toLowerCase();
+            return n === qLower || n === qLowerNorm;
+          }
+        );
 
-        const artistSuggestions: Suggestion[] = (artists || []).map((a: any) => ({
+        const baseAlbumSuggestions: Suggestion[] = (albums || [])
+          .map((d: any) => ({
+            label: d.title,
+            primaryLabel: d.title,
+            type: "album" as const,
+            id: undefined,
+            artist_name: d.artist_name,
+            subLabel: d?.artists?.name ?? d.artist_name ?? undefined,
+          }))
+          .filter((d: any) => !!d.label) as Suggestion[];
+
+        const baseArtistSuggestions: Suggestion[] = (artists || []).map((a: any) => ({
           label: a.name,
+          primaryLabel: a.name,
           type: "artist" as const,
           id: a.id as string,
         }));
 
-        const trackSuggestions: Suggestion[] = (tracks || []).map((t: any) => ({
-          label: `${t.title}${t.artist_name ? ` — ${t.artist_name}` : ""}`,
-          type: "track" as const,
-          id: t.id as string,
+        const artistIds = (artists || []).map((a: any) => a.id).filter(Boolean);
+        let albumCounts: Record<string, number> = {};
+        if (artistIds.length > 0) {
+          const { data: artistAlbums } = await supabase
+            .from("albums")
+            .select("artist_id")
+            .in("artist_id", artistIds);
+          (artistAlbums || []).forEach((a: any) => {
+            const id = String(a.artist_id);
+            albumCounts[id] = (albumCounts[id] ?? 0) + 1;
+          });
+        }
+
+        const artistSuggestionsWithCounts: Suggestion[] = baseArtistSuggestions.map((a) => ({
+          ...a,
+          subLabel: pluralizeAlbums(albumCounts[String(a.id)] ?? 0),
         }));
 
-        const dedup = new Map<string, { label: string; type: "album" | "genre" | "artist" | "track"; id?: string }>();
+        const baseTrackSuggestions: Suggestion[] = (tracks || []).map((t: any) => ({
+          label: t.title,
+          primaryLabel: t.title,
+          type: "track" as const,
+          id: t.id as string,
+          artist_name: t.artist_name,
+          subLabel: t.artist_name ?? t?.albums?.artists?.name ?? t?.albums?.artist_name ?? undefined,
+        })) as Suggestion[];
+
+        const artistNameLower = exactArtist ? String(exactArtist.name).toLowerCase() : "";
+        let filteredAlbums = exactArtist
+          ? baseAlbumSuggestions.filter((d: any) => (d.artist_name ?? "").toLowerCase() === artistNameLower)
+          : baseAlbumSuggestions;
+        let filteredTracks = exactArtist
+          ? baseTrackSuggestions.filter((t: any) => (t.artist_name ?? "").toLowerCase() === artistNameLower)
+          : baseTrackSuggestions;
+
+        if (exactArtist && filteredAlbums.length === 0 && filteredTracks.length === 0) {
+          const [{ data: artistAlbums }, { data: artistTracks }] = await Promise.all([
+            supabase
+              .from("albums")
+              .select("title, artist_name")
+              .ilike("artist_name", exactArtist.name)
+              .limit(5),
+            supabase
+              .from("tracks")
+              .select("id, title, artist_name")
+              .ilike("artist_name", exactArtist.name)
+              .limit(5),
+          ]);
+
+          filteredAlbums = (artistAlbums || []).map((d: any) => ({
+            label: d.title,
+            primaryLabel: d.title,
+            type: "album" as const,
+            id: undefined,
+            artist_name: d.artist_name,
+          }));
+
+          filteredTracks = (artistTracks || []).map((t: any) => ({
+            label: `${t.title}${t.artist_name ? ` — ${t.artist_name}` : ""}`,
+            primaryLabel: t.title,
+            type: "track" as const,
+            id: t.id as string,
+            artist_name: t.artist_name,
+          }));
+        }
+
+        const hasArtistOnlyResults = exactArtist && (filteredAlbums.length > 0 || filteredTracks.length > 0);
+
+        const albumSuggestions = hasArtistOnlyResults ? filteredAlbums : baseAlbumSuggestions;
+        const trackSuggestions = hasArtistOnlyResults ? filteredTracks : baseTrackSuggestions;
+        const artistSuggestions = exactArtist
+          ? artistSuggestionsWithCounts.filter((a) => a.id === exactArtist.id)
+          : artistSuggestionsWithCounts;
+
+        const dedup = new Map<string, { label: string; type: "album" | "artist" | "track"; id?: string; primaryLabel?: string; subLabel?: string }>();
         [...albumSuggestions, ...artistSuggestions, ...trackSuggestions].forEach((s) => {
           const key = `${s.type}:${s.label}:${s.id ?? ""}`;
           if (!dedup.has(key)) dedup.set(key, s);
         });
 
-        setSearchSuggestions(Array.from(dedup.values()));
+        const results = Array.from(dedup.values());
+        const typeOrder: Record<Suggestion["type"], number> = {
+          artist: 0,
+          album: 1,
+          track: 2,
+        };
+        results.sort((a, b) => {
+          const aLabel = (a.primaryLabel ?? a.label).toLowerCase();
+          const bLabel = (b.primaryLabel ?? b.label).toLowerCase();
+          const aExact = aLabel === qLower || aLabel === qLowerNorm ? 0 : 1;
+          const bExact = bLabel === qLower || bLabel === qLowerNorm ? 0 : 1;
+          if (aExact !== bExact) return aExact - bExact;
+          if (aExact === 0 && bExact === 0) {
+            return typeOrder[a.type] - typeOrder[b.type];
+          }
+          return a.label.localeCompare(b.label);
+        });
+
+        setSearchSuggestions(results.slice(0, 5));
         setShowSuggestions(true);
       }
     } catch (err) {
@@ -236,6 +381,10 @@ export default function Header() {
   // call debounced
   const handleSearchInputChange = (value: string) => {
     setSearch(value);
+    if (!value || value.trim().length < 2) {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+    }
 
     // debounce
     if (suggestionDebounceRef.current) {
@@ -258,6 +407,18 @@ export default function Header() {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+
+  // clear suggestions on route change
+  useEffect(() => {
+    const onRoute = () => {
+      setShowSuggestions(false);
+      setSearchSuggestions([]);
+    };
+    router.events.on("routeChangeComplete", onRoute);
+    return () => {
+      router.events.off("routeChangeComplete", onRoute);
+    };
+  }, [router.events]);
 
   const handleSuggestionSelect = (s: Suggestion) => {
     setShowSuggestions(false);
@@ -389,10 +550,11 @@ export default function Header() {
   // JSX
   // -----------------------
   return (
-    <header className="fixed top-0 left-0 w-full z-50">
-      <div className="bg-white dark:bg-[#0b0f14] border-b border-gray-200 dark:border-gray-800 shadow-sm transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+    <>
+      <header className="fixed top-0 left-0 w-full z-50">
+        <div className="bg-white dark:bg-[#0b0f14] border-b border-gray-200 dark:border-gray-800 shadow-sm transition-colors duration-300">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-20">
             {/* LOGO */}
             <div className="flex items-center gap-3">
               <a
@@ -405,17 +567,14 @@ export default function Header() {
                 }}
                 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white hover:opacity-90 transition"
               >
-                <span className="text-2xl">🎵</span>
-                <span>AlbumApp</span>
+                  <img
+                    src={theme === "dark" ? "/images/LOGO_NO_BG_WHITE_BG.png" : "/images/LOGO_WBG.png"}
+                    alt="AlbumApp"
+                    className="h-7 w-auto"
+                  />
               </a>
 
-              {/* small quick info (only on wide screens) */}
-              <div className="hidden md:flex items-center text-xs text-gray-500 dark:text-gray-400 ml-3">
-                <span className="mr-3">Twoja kolekcja</span>
-                <span className="px-2 py-1 rounded-full text-[11px]" style={{ background: "rgba(0,234,255,0.06)", color: NEON.blue }}>
-                  neon
-                </span>
-              </div>
+              {/* (removed) quick info for a cleaner header */}
             </div>
 
             {/* SEARCH + FILTERS */}
@@ -429,7 +588,12 @@ export default function Header() {
                     value={search}
                     onChange={(e) => handleSearchInputChange(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    onFocus={() => { if (searchSuggestions.length > 0) setShowSuggestions(true); }}
+                    onFocus={() => {
+                      if (search.trim().length >= 2) {
+                        fetchSearchSuggestions(search);
+                        setShowSuggestions(true);
+                      }
+                    }}
                     className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
                     aria-label="Szukaj albumów lub utworów"
                   />
@@ -511,12 +675,17 @@ export default function Header() {
                                 onClick={() => handleSuggestionSelect(sug)}
                                 className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-[#0f1418] transition"
                               >
-                                {sug.label}
+                                <span className="flex items-center gap-2">
+                                  <span className="truncate">{sug.label}</span>
+                                  {sug.subLabel && (
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">
+                                      · {sug.subLabel}
+                                    </span>
+                                  )}
+                                </span>
                                 <span className="ml-2 text-[10px] text-gray-400">
                                   {sug.type === "artist"
                                     ? "artysta"
-                                    : sug.type === "genre"
-                                    ? "gatunek"
                                     : sug.type === "track"
                                     ? "utwór"
                                     : "album"}
@@ -550,22 +719,22 @@ export default function Header() {
                 {user ? "Wyloguj" : "Zaloguj"}
               </button>
             </nav>
+            </div>
           </div>
-        </div>
 
-        {/* FILTER PANEL */}
-        <AnimatePresence>
-          {showFilters && (
-            <motion.div
-              id="filters-panel"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.18 }}
-              className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#071018] transition-colors"
-            >
-              <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* FILTER PANEL */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                id="filters-panel"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#071018] transition-colors"
+              >
+                <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                   {/* LEFT: Genres + quick filters + presets */}
                   <div className="lg:col-span-2">
                     <div className="flex items-center justify-between mb-3">
@@ -836,17 +1005,16 @@ export default function Header() {
                 </div>
 
                 {/* small hint */}
-                <div className="mt-4 text-xs text-gray-400">
-                  Tip: Kliknij nazwy gatunków, aby dodać je do filtrów. Presety są zapisywane w LocalStorage.
+                  <div className="mt-4 text-xs text-gray-400">
+                    Tip: Kliknij nazwy gatunków, aby dodać je do filtrów. Presety są zapisywane w LocalStorage.
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </header>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </header>
+      <div className="h-20" />
+    </>
   );
 }
-
-
-

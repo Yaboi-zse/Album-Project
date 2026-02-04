@@ -24,6 +24,7 @@ interface Props {
 }
 
 const CARD_WIDTH = 240;
+const CARD_GAP = 24; // gap-6
 const BASE_SPEED_PX_PER_SEC = 40;
 
 export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
@@ -35,6 +36,8 @@ export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
 
   const [maxOffset, setMaxOffset] = useState(0);
   const [speedFactor, setSpeedFactor] = useState(1);
+  const [isHovering, setIsHovering] = useState(false);
+  const [selectedDot, setSelectedDot] = useState<number | null>(null);
 
   // --- OBLICZANIE SZEROKOŚCI TAŚMY ---
   useEffect(() => {
@@ -52,6 +55,16 @@ export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
   useEffect(() => {
     speedRef.current = speedFactor;
   }, [speedFactor]);
+
+  useEffect(() => {
+    if (selectedDot !== null) {
+      setSpeedFactor(0);
+    } else if (isHovering) {
+      setSpeedFactor(0.35);
+    } else {
+      setSpeedFactor(1);
+    }
+  }, [selectedDot, isHovering]);
 
   useEffect(() => {
     if (maxOffset <= 0) {
@@ -105,8 +118,8 @@ export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
       <h2 className="text-2xl md:text-3xl font-bold mb-6 flex items-center gap-3">🔥 Top 10 albumów</h2>
       <div
         className="relative"
-        onMouseEnter={() => setSpeedFactor(0.35)}
-        onMouseLeave={() => setSpeedFactor(1)}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
       >
         <div
           ref={containerRef}
@@ -132,6 +145,34 @@ export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
             ))}
           </motion.div>
         </div>
+
+        {/* Dots navigation */}
+        {albums.length > 1 && (
+          <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-2">
+            {[0, 1].map((i) => {
+              const isActive = selectedDot === i;
+              return (
+                <button
+                  key={`dot-${i}`}
+                  type="button"
+                  aria-label={i === 0 ? "Początek" : "Koniec"}
+                  onClick={() => {
+                    const nextSelected = selectedDot === i ? null : i;
+                    setSelectedDot(nextSelected);
+                    if (nextSelected === null) return;
+                    const target = i === 0 ? 0 : -maxOffset;
+                    const current = x.get();
+                    directionRef.current = target < current ? 1 : -1;
+                    x.set(target);
+                  }}
+                  className={`h-2.5 w-2.5 rounded-full transition ${
+                    isActive ? "bg-white/90 scale-110" : "bg-white/30 hover:bg-white/60"
+                  }`}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );
