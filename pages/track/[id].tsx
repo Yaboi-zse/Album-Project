@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../src/lib/supabaseClient";
+import { RATING_COLORS } from "../../styles/theme";
 
 type Track = {
   id?: string;
@@ -42,6 +43,13 @@ export default function TrackPage() {
   const [track, setTrack] = useState<Track | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [userRating, setUserRating] = useState<number | null>(null);
+  const [avgRating, setAvgRating] = useState<number | null>(null);
+  const [ratingCounts, setRatingCounts] = useState<number[]>(Array(10).fill(0));
+  const [ratingTotal, setRatingTotal] = useState(0);
+  const [hoveredRatingValue, setHoveredRatingValue] = useState<number | null>(null);
+  const [trackDbId, setTrackDbId] = useState<string | null>(null);
 
   const [lyricsRaw, setLyricsRaw] = useState<string | null>(null);
   const [lyricsLines, setLyricsLines] = useState<LyricLine[]>([]);
@@ -60,6 +68,80 @@ export default function TrackPage() {
     name
       .split(/,|&| feat\.| ft\.| x | with | and /i)[0]
       .trim();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data?.user ?? null);
+    });
+  }, []);
+
+  const fetchRatings = async () => {
+    if (!trackDbId) return;
+
+    const { data: ratings } = await supabase
+      .from("track_ratings")
+      .select("rating")
+      .eq("track_id", trackDbId);
+
+    if (ratings?.length) {
+      const avg = ratings.reduce((s, r) => s + Number(r.rating), 0) / ratings.length;
+      setAvgRating(Number(avg.toFixed(1)));
+      const counts = Array(10).fill(0) as number[];
+      ratings.forEach((r) => {
+        const value = Number(r.rating);
+        if (value >= 1 && value <= 10) counts[value - 1] += 1;
+      });
+      setRatingCounts(counts);
+      setRatingTotal(ratings.length);
+    } else {
+      setAvgRating(null);
+      setRatingCounts(Array(10).fill(0));
+      setRatingTotal(0);
+    }
+
+    if (user?.id) {
+      const { data: ur } = await supabase
+        .from("track_ratings")
+        .select("rating")
+        .eq("track_id", trackDbId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      setUserRating(ur?.rating ?? null);
+    }
+  };
+
+  useEffect(() => {
+    fetchRatings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackDbId, user?.id]);
+
+  async function handleRating(rating: number) {
+    if (!user) return alert("Musisz być zalogowany.");
+    if (!trackDbId) return;
+
+    const { data: exists } = await supabase
+      .from("track_ratings")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("track_id", trackDbId)
+      .maybeSingle();
+
+    if (exists) {
+      await supabase
+        .from("track_ratings")
+        .update({ rating })
+        .eq("id", exists.id);
+    } else {
+      await supabase.from("track_ratings").insert({
+        rating,
+        track_id: trackDbId,
+        user_id: user.id,
+      });
+    }
+
+    setUserRating(rating);
+    fetchRatings();
+  }
 
   // ---------- load track ----------
   useEffect(() => {
@@ -281,6 +363,31 @@ export default function TrackPage() {
       cancel = true;
     };
   }, [trackId]);
+
+  // ---------- resolve track db id ----------
+  useEffect(() => {
+    if (!track) return;
+    const localId = (track as any).id ?? null;
+    if (localId) {
+      setTrackDbId(localId);
+      return;
+    }
+    if (!track.spotify_id) return;
+
+    let cancel = false;
+    supabase
+      .from("tracks")
+      .select("id")
+      .eq("spotify_id", track.spotify_id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancel) setTrackDbId(data?.id ?? null);
+      });
+
+    return () => {
+      cancel = true;
+    };
+  }, [track]);
 
   // ---------- LOAD LYRICS ----------
   useEffect(() => {
@@ -582,9 +689,29 @@ export default function TrackPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
             <aside className="h-full">
-              <div className="h-full p-4 rounded-xl bg-white/60 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10">
+              <div className="h-full p-4 rounded-xl bg-white/60 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10 relative">
                 <h4 className="font-semibold mb-3">Statystyki</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="absolute top-4 right-4 flex items-end gap-1 h-10 group">
+                  {ratingCounts.map((count, idx) => {
+                    const max = Math.max(1, ...ratingCounts);
+                    const height = Math.max(2, Math.round((count / max) * 32));
+                    return (
+                      <div
+                        key={`rating-bar-${idx}`}
+                        style={{
+                          height: `${height}px`,
+                          background: RATING_COLORS[idx + 1],
+                          opacity: count ? 1 : 0.3,
+                        }}
+                        className="w-2 rounded-sm transition-transform duration-150 group-hover:scale-y-110 group-hover:brightness-110"
+                      />
+                    );
+                  })}
+                  <div className="pointer-events-none absolute -top-7 right-0 rounded-md bg-black/80 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    Liczba ocen: {ratingTotal}, ocena: {avgRating ?? "—"}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm mt-6">
                   <div>
                     <p className="text-gray-500 dark:text-gray-400">Długość</p>
                     <p className="text-lg font-bold">
@@ -598,6 +725,53 @@ export default function TrackPage() {
                     <p className="text-lg font-bold">{track.track_number ?? "—"}</p>
                   </div>
                 </div>
+
+                <div className="mt-6">
+                  <p className="text-sm mb-2">Twoja ocena:</p>
+                  <div
+                    className="grid grid-cols-10 gap-1.5 w-full"
+                    onMouseLeave={() => setHoveredRatingValue(null)}
+                  >
+                    {Array.from({ length: 10 }).map((_, idx) => {
+                      const value = idx + 1;
+                      const isActive = userRating === value;
+                      const isHighlighted =
+                        hoveredRatingValue !== null && value <= hoveredRatingValue;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onMouseEnter={() => setHoveredRatingValue(value)}
+                          onClick={() => handleRating(value)}
+                          style={{
+                            background: isActive
+                              ? RATING_COLORS[value]
+                              : isHighlighted
+                              ? `${RATING_COLORS[value]}33`
+                              : "rgba(255,255,255,0.08)",
+                            border: `1px solid ${
+                              isActive || isHighlighted
+                                ? RATING_COLORS[value]
+                                : "rgba(255,255,255,0.2)"
+                            }`,
+                            transform: isActive
+                              ? "scale(1.15)"
+                              : isHighlighted
+                              ? "scale(1.08)"
+                              : "scale(1)",
+                            boxShadow: isActive ? `0 0 12px ${RATING_COLORS[value]}` : "none",
+                            transition: "all 100ms ease",
+                          }}
+                          className="aspect-square rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
+                        >
+                          {value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
               </div>
             </aside>
 

@@ -26,7 +26,8 @@
     "playwright": "^1.56.1",
     "postcss": "^8.5.6",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "tekstowo-api": "github:Davilarek/Tekstowo-Unofficial-API"
   },
   "devDependencies": {
     "@ljharb/tsconfig": "^0.3.2",

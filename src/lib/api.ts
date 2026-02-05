@@ -30,6 +30,15 @@ interface Album {
   artists: { name: string }[] | { name: string } | null;
 }
 
+interface Track {
+  id: string | number;
+  title: string;
+  album_id?: string | number | null;
+  cover_url?: string | null;
+  artist_name?: string | null;
+  artists?: { name: string }[] | { name: string } | null;
+}
+
 // --- FUNKCJE API ---
 
 export async function fetchArtists() {
@@ -203,6 +212,61 @@ export async function fetchRecommendations(userId: string) {
   const { data: candidates, error } = await supabase.from("albums").select(`id, title, cover_url, artists(name), genre`).or(orConditions).not("id", "in", `(${ratedIds.join(",")})`).limit(10);
   if (error) console.error("Error fetching recommendations:", error);
   return candidates || [];
+}
+
+export async function fetchTopSingles(limit = 5) {
+  try {
+    const { data: ratingsData, error: ratingsError } = await supabase
+      .from("track_ratings")
+      .select("track_id, rating");
+    if (ratingsError) throw ratingsError;
+
+    const trackRatings = (ratingsData || []).reduce((acc, rating) => {
+      if (!acc[rating.track_id]) acc[rating.track_id] = { sum: 0, count: 0 };
+      acc[rating.track_id].sum += rating.rating;
+      acc[rating.track_id].count += 1;
+      return acc;
+    }, {} as Record<string, { sum: number; count: number }>);
+
+    const tracksWithAvg = Object.entries(trackRatings)
+      .map(([track_id, data]) => ({
+        track_id,
+        avg_rating: Number((data.sum / data.count).toFixed(1)),
+        votes: data.count,
+      }))
+      .sort((a, b) => b.avg_rating - a.avg_rating)
+      .slice(0, limit);
+
+    if (tracksWithAvg.length === 0) return [];
+
+    const trackIds = tracksWithAvg.map((item) => item.track_id);
+    const { data: tracksData, error: tracksError } = await supabase
+      .from("tracks")
+      .select("id, title, album_id, albums(cover_url, artist_name, artists(name))")
+      .in("id", trackIds);
+    if (tracksError) throw tracksError;
+    if (!tracksData) return [];
+
+    return tracksData.map((track: Track) => {
+      const ratingInfo = tracksWithAvg.find((item) => item.track_id === track.id);
+      const album = (track as any).albums ?? null;
+      const artistName =
+        album?.artist_name ??
+        (Array.isArray(album?.artists) ? album?.artists?.[0]?.name : album?.artists?.name) ??
+        "Nieznany artysta";
+
+      return {
+        ...track,
+        cover_url: album?.cover_url ?? null,
+        artist_name: artistName,
+        avg_rating: ratingInfo?.avg_rating ?? 0,
+        votes: ratingInfo?.votes ?? 0,
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching top singles:", error);
+    return [];
+  }
 }
 
 export async function toggleFavorite(albumId: string | number, isCurrentlyFavorite: boolean, userId: string) {

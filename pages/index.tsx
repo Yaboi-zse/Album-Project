@@ -12,7 +12,7 @@ import { Top10Slider } from '../src/components/Top10Slider';
 import { RecommendationsSidebar } from '../src/components/RecommendationsSidebar';
 import { AlbumCards } from '../src/components/AlbumCards';
 import { Analytics } from "@vercel/analytics/next"
-const ALBUMS_PER_PAGE = 15;
+const ALBUMS_PER_PAGE = 20;
 
 export default function HomePage() {
   // --- HOOKS ---
@@ -31,6 +31,7 @@ export default function HomePage() {
   const {
     albums,
     top10Albums,
+    topSingles,
     newReleases,
     recommendations,
     total,
@@ -100,6 +101,7 @@ export default function HomePage() {
             newReleases={newReleases}
             recommendations={recommendations}
             topAlbums={top10Albums}
+            topSingles={topSingles}
           />
         </section>
 

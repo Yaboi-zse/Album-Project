@@ -34,6 +34,8 @@ export default function AlbumDetails() {
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
   const [hoveredRatingValue, setHoveredRatingValue] = useState<number | null>(null);
+  const [ratingCounts, setRatingCounts] = useState<number[]>(Array(10).fill(0));
+  const [ratingTotal, setRatingTotal] = useState(0);
 
   const [loading, setLoading] = useState(true);
 
@@ -101,6 +103,16 @@ export default function AlbumDetails() {
         const avg =
           ratings.reduce((s, r) => s + Number(r.rating), 0) / ratings.length;
         setAvgRating(Number(avg.toFixed(1)));
+        const counts = Array(10).fill(0) as number[];
+        ratings.forEach((r) => {
+          const value = Number(r.rating);
+          if (value >= 1 && value <= 10) counts[value - 1] += 1;
+        });
+        setRatingCounts(counts);
+        setRatingTotal(ratings.length);
+      } else {
+        setRatingCounts(Array(10).fill(0));
+        setRatingTotal(0);
       }
 
       // User data
@@ -313,7 +325,7 @@ return (
             className="rounded-xl shadow-xl"
           />
 
-          <div className="p-4 rounded-xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10 h-full">
+          <div className="p-4 rounded-xl bg-white/70 border border-gray-300 shadow-lg dark:bg-white/5 dark:border-white/10 h-full relative">
             <h3 className="text-lg font-semibold mb-2">🎵 Informacje</h3>
             <p className="font-bold text-black dark:text-white">{album.title}</p>
 
@@ -331,15 +343,37 @@ return (
             <p className="text-sm">Gatunek: {album.genre ?? "—"}</p>
 
             <div className="flex items-center gap-3 mt-4">
-              <span>⭐ {avgRating ?? "—"}</span>
-              <button
-                onClick={toggleFavorite}
-                className={`px-3 py-1 rounded-lg ${
-                  isFavorite ? "bg-pink-600" : "bg-white/10"
-                }`}
-              >
-                {isFavorite ? "❤️ Ulubione" : "Ulubione"}
-              </button>
+              <div className="flex items-center gap-3">
+                <span>⭐ {avgRating ?? "—"}</span>
+                <button
+                  onClick={toggleFavorite}
+                  className={`px-3 py-1 rounded-lg ${
+                    isFavorite ? "bg-pink-600" : "bg-white/10"
+                  }`}
+                >
+                  {isFavorite ? "❤️ Ulubione" : "Ulubione"}
+                </button>
+              </div>
+            </div>
+            <div className="absolute top-4 right-4 flex items-end gap-1 h-14 group">
+              {ratingCounts.map((count, idx) => {
+                const max = Math.max(1, ...ratingCounts);
+                const height = Math.max(3, Math.round((count / max) * 48));
+                return (
+                  <div
+                    key={`rating-bar-${idx}`}
+                    style={{
+                      height: `${height}px`,
+                      background: RATING_COLORS[idx + 1],
+                      opacity: count ? 1 : 0.3,
+                    }}
+                    className="w-2.5 rounded-sm transition-transform duration-150 group-hover:scale-y-110 group-hover:brightness-110"
+                  />
+                );
+              })}
+              <div className="pointer-events-none absolute -top-7 right-0 rounded-md bg-black/80 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                Liczba ocen: {ratingTotal}, ocena: {avgRating ?? "—"}
+              </div>
             </div>
 
             <div className="mt-4">

@@ -41,6 +41,7 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
   // --- STATE MANAGEMENT ---
   const [albums, setAlbums] = useState<Album[]>([]);
   const [top10Albums, setTop10Albums] = useState<Album[]>([]);
+  const [topSingles, setTopSingles] = useState<any[]>([]);
   const [newReleases, setNewReleases] = useState<Album[]>([]);
   const [recommendations, setRecommendations] = useState<Album[]>([]);
   const [total, setTotal] = useState<number>(0);
@@ -57,12 +58,14 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
 
-      const [top10, releases, recs] = await Promise.all([
+      const [top10, topSinglesRes, releases, recs] = await Promise.all([
         api.fetchTop10Albums(),
+        api.fetchTopSingles(),
         api.fetchNewReleases(),
         user ? api.fetchRecommendations(user.id) : Promise.resolve([])
       ]);
       setTop10Albums(top10);
+      setTopSingles(topSinglesRes);
       setNewReleases(releases);
       setRecommendations(recs);
     };
@@ -132,6 +135,7 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
   return {
     albums,
     top10Albums,
+    topSingles,
     newReleases,
     recommendations,
     total,
