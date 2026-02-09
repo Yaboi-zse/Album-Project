@@ -34,6 +34,7 @@ export default async function handler(
           spotify_url: trackData.spotify_url,
           preview_url: trackData.preview_url,
           artist_name: trackData.artist_name,
+          album_id: trackData.album_id ?? null,
         })
         .eq("spotify_id", trackData.spotify_id)
         .select();
@@ -49,6 +50,7 @@ export default async function handler(
           spotify_url: trackData.spotify_url,
           preview_url: trackData.preview_url,
           artist_name: trackData.artist_name,
+          album_id: trackData.album_id ?? null,
         })
         .select();
     }

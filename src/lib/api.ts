@@ -34,6 +34,7 @@ interface Track {
   id: string | number;
   title: string;
   album_id?: string | number | null;
+  spotify_id?: string | null;
   cover_url?: string | null;
   artist_name?: string | null;
   artists?: { name: string }[] | { name: string } | null;
@@ -65,7 +66,7 @@ export async function fetchAlbums(filters: AlbumFilters) {
   const { page, limit, debouncedSearch, genreFilter, yearFrom, yearTo, artistFilter, ratingMin, sortBy } = filters;
   try {
     const offset = (page - 1) * limit;
-    let query = supabase.from("albums").select(`id, title, year, genre, cover_url, artist_id, artists(name)`, { count: "exact" });
+    let query = supabase.from("albums").select(`id, title, year, genre, cover_url, artist_id, spotify_id, artists(name)`, { count: "exact" });
     if (debouncedSearch) {
       const normalizeQuery = (value: string) =>
         value
@@ -126,7 +127,15 @@ export async function fetchAlbums(filters: AlbumFilters) {
     const { data: albumRows, count: totalCount, error: queryError } = await query;
     if (queryError) throw queryError;
     if (!albumRows || albumRows.length === 0) return { albums: [], total: totalCount ?? 0 };
-    const albumIds = albumRows.map((r: { id: string | number }) => r.id);
+    // Dedupe by spotify_id (or id if spotify_id missing) to avoid UI duplicates
+    const seenKeys = new Set<string>();
+    const dedupedRows = albumRows.filter((row: any) => {
+      const key = row.spotify_id ? `s:${row.spotify_id}` : `id:${row.id}`;
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+    const albumIds = dedupedRows.map((r: { id: string | number }) => r.id);
     const [ratingsRes, favsRes, userRes] = await Promise.all([
       supabase.from("ratings").select("album_id, rating").in("album_id", albumIds),
       supabase.from("favorites").select("album_id, user_id").in("album_id", albumIds),
@@ -145,7 +154,7 @@ export async function fetchAlbums(filters: AlbumFilters) {
     }
     const ratingsByAlbum = (ratingsRes.data || []).reduce((acc, r) => { (acc[r.album_id] = acc[r.album_id] || []).push(Number(r.rating)); return acc; }, {} as Record<string, number[]>);
     const favCount = (favsRes.data || []).reduce((acc, f) => { acc[f.album_id] = (acc[f.album_id] || 0) + 1; return acc; }, {} as Record<string, number>);
-    let combined = albumRows.map((a: Album) => ({
+    let combined = dedupedRows.map((a: Album) => ({
       ...a,
       artist_name: Array.isArray(a.artists) ? a.artists[0]?.name ?? "Nieznany artysta" : a.artists?.name ?? "Nieznany artysta",
       avg_rating: (ratingsByAlbum[a.id as string] || []).length > 0 ? Number(((ratingsByAlbum[a.id as string] || []).reduce((s, x) => s + x, 0) / (ratingsByAlbum[a.id as string] || []).length).toFixed(1)) : "—",
@@ -242,27 +251,47 @@ export async function fetchTopSingles(limit = 5) {
     const trackIds = tracksWithAvg.map((item) => item.track_id);
     const { data: tracksData, error: tracksError } = await supabase
       .from("tracks")
-      .select("id, title, album_id, albums(cover_url, artist_name, artists(name))")
+      .select("id, title, album_id, spotify_id, artist_name, albums(cover_url, artist_name, artists(name))")
       .in("id", trackIds);
     if (tracksError) throw tracksError;
     if (!tracksData) return [];
 
-    return tracksData.map((track: Track) => {
-      const ratingInfo = tracksWithAvg.find((item) => item.track_id === track.id);
-      const album = (track as any).albums ?? null;
-      const artistName =
-        album?.artist_name ??
-        (Array.isArray(album?.artists) ? album?.artists?.[0]?.name : album?.artists?.name) ??
-        "Nieznany artysta";
+    const enriched = await Promise.all(
+      tracksData.map(async (track: Track) => {
+        const ratingInfo = tracksWithAvg.find((item) => item.track_id === track.id);
+        const album = (track as any).albums ?? null;
+        let artistName =
+          track.artist_name ??
+          album?.artist_name ??
+          (Array.isArray(album?.artists) ? album?.artists?.[0]?.name : album?.artists?.name) ??
+          null;
+        let coverUrl = album?.cover_url ?? null;
 
-      return {
-        ...track,
-        cover_url: album?.cover_url ?? null,
-        artist_name: artistName,
-        avg_rating: ratingInfo?.avg_rating ?? 0,
-        votes: ratingInfo?.votes ?? 0,
-      };
-    });
+        if ((!artistName || !coverUrl) && track.spotify_id) {
+          try {
+            const res = await fetch(
+              `/api/spotify/track?track_id=${encodeURIComponent(track.spotify_id)}`
+            );
+            if (res.ok) {
+              const t = await res.json();
+              const primaryArtist = Array.isArray(t.artists) ? t.artists[0] : null;
+              artistName = artistName ?? primaryArtist?.name ?? null;
+              coverUrl = coverUrl ?? t.album?.images?.[0]?.url ?? null;
+            }
+          } catch {}
+        }
+
+        return {
+          ...track,
+          cover_url: coverUrl ?? null,
+          artist_name: artistName ?? "Nieznany artysta",
+          avg_rating: ratingInfo?.avg_rating ?? 0,
+          votes: ratingInfo?.votes ?? 0,
+        };
+      })
+    );
+
+    return enriched;
   } catch (error) {
     console.error("Error fetching top singles:", error);
     return [];

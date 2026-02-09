@@ -69,19 +69,60 @@ export default function TrackPage() {
       .split(/,|&| feat\.| ft\.| x | with | and /i)[0]
       .trim();
 
+  const ensureTrackSaved = async (trackData: any) => {
+    if (trackDbId) return trackDbId;
+    if (!trackData?.spotify_id) return null;
+    try {
+      const res = await fetch("/api/tracks/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(trackData),
+      });
+      if (!res.ok) return null;
+      const saved = await res.json();
+      const savedId = saved?.id ?? null;
+      if (savedId) setTrackDbId(savedId);
+      return savedId;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data?.user ?? null);
     });
   }, []);
 
+  const resolveTrackDbId = async () => {
+    if (trackDbId) return trackDbId;
+    const localId = (track as any)?.id ?? null;
+    if (localId) {
+      setTrackDbId(localId);
+      return localId;
+    }
+    if (!track?.spotify_id) return null;
+    const { data } = await supabase
+      .from("tracks")
+      .select("id")
+      .eq("spotify_id", track.spotify_id)
+      .maybeSingle();
+    const dbId = data?.id ?? null;
+    if (dbId) {
+      setTrackDbId(dbId);
+      return dbId;
+    }
+    return await ensureTrackSaved(track);
+  };
+
   const fetchRatings = async () => {
-    if (!trackDbId) return;
+    const resolvedId = await resolveTrackDbId();
+    if (!resolvedId) return;
 
     const { data: ratings } = await supabase
       .from("track_ratings")
       .select("rating")
-      .eq("track_id", trackDbId);
+      .eq("track_id", resolvedId);
 
     if (ratings?.length) {
       const avg = ratings.reduce((s, r) => s + Number(r.rating), 0) / ratings.length;
@@ -103,7 +144,7 @@ export default function TrackPage() {
       const { data: ur } = await supabase
         .from("track_ratings")
         .select("rating")
-        .eq("track_id", trackDbId)
+        .eq("track_id", resolvedId)
         .eq("user_id", user.id)
         .maybeSingle();
       setUserRating(ur?.rating ?? null);
@@ -113,17 +154,21 @@ export default function TrackPage() {
   useEffect(() => {
     fetchRatings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackDbId, user?.id]);
+  }, [trackDbId, track?.id, track?.spotify_id, user?.id]);
 
   async function handleRating(rating: number) {
     if (!user) return alert("Musisz być zalogowany.");
-    if (!trackDbId) return;
+    const resolvedId = await resolveTrackDbId();
+    if (!resolvedId) {
+      alert("Nie udało się znaleźć ID utworu w bazie.");
+      return;
+    }
 
     const { data: exists } = await supabase
       .from("track_ratings")
       .select("id")
       .eq("user_id", user.id)
-      .eq("track_id", trackDbId)
+      .eq("track_id", resolvedId)
       .maybeSingle();
 
     if (exists) {
@@ -134,7 +179,7 @@ export default function TrackPage() {
     } else {
       await supabase.from("track_ratings").insert({
         rating,
-        track_id: trackDbId,
+        track_id: resolvedId,
         user_id: user.id,
       });
     }
@@ -324,16 +369,9 @@ export default function TrackPage() {
             artist_display_name: resolvedArtistName ?? primaryArtist?.name ?? null,
           };
 
-          try {
-            await supabase
-              .from("tracks")
-              .upsert(normalized, {
-                onConflict: "spotify_id",
-                ignoreDuplicates: false,
-              })
-              .select();
-          } catch (upsertErr) {
-            console.warn("Upsert failed:", upsertErr);
+          const savedId = await ensureTrackSaved(normalized);
+          if (savedId) {
+            normalized.id = savedId;
           }
 
           if (!cancel) {

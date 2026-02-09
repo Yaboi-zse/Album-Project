@@ -47,6 +47,15 @@ export default function AlbumDetails() {
       .trim();
   };
 
+  const extractSpotifyAlbumId = (text?: string | null) => {
+    if (!text) return null;
+    const m1 = text.match(/open\.spotify\.com\/album\/([A-Za-z0-9]+)/i);
+    if (m1?.[1]) return m1[1];
+    const m2 = text.match(/spotify:album:([A-Za-z0-9]+)/i);
+    if (m2?.[1]) return m2[1];
+    return null;
+  };
+
   // --------- Fetch Spotify tracks ---------
   const fetchSpotifyTracks = useCallback(async (spotifyAlbumId?: string) => {
     if (!spotifyAlbumId) return setTracks([]);
@@ -91,7 +100,30 @@ export default function AlbumDetails() {
         data.artist_id ?? (data.artists && (data.artists as any).id) ?? null;
       setAlbum({ ...data, artist_name: artistName, artist_id: artistId });
 
-      if (data.spotify_id) fetchSpotifyTracks(data.spotify_id);
+      let spotifyId = data.spotify_id ?? null;
+
+      if (!spotifyId) {
+        const fromDesc = extractSpotifyAlbumId(data.description);
+        if (fromDesc) {
+          spotifyId = fromDesc;
+        } else {
+          try {
+            const q = `${data.title} ${artistName ?? ""}`.trim();
+            const res = await fetch(`/api/spotify/search?q=${encodeURIComponent(q)}`);
+            if (res.ok) {
+              const found = await res.json();
+              spotifyId = found?.spotify_id ?? spotifyId;
+            }
+          } catch {}
+        }
+
+        if (spotifyId) {
+          await supabase.from("albums").update({ spotify_id: spotifyId }).eq("id", albumId);
+          setAlbum((prev: any) => (prev ? { ...prev, spotify_id: spotifyId } : prev));
+        }
+      }
+
+      if (spotifyId) fetchSpotifyTracks(spotifyId);
 
       // Ratings
       const { data: ratings } = await supabase

@@ -1,6 +1,5 @@
-// spotify-crawler.js
+﻿// spotify-crawler.js
 import fs from 'fs';
-import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.local' });
@@ -9,11 +8,17 @@ const clientId = process.env.SPOTIFY_CLIENT_ID;
 const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
 if (!clientId || !clientSecret) {
-  console.error('❌ Brakuje SPOTIFY_CLIENT_ID lub SPOTIFY_CLIENT_SECRET w .env.local');
+  console.error('Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET in .env.local');
   process.exit(1);
 }
 
+let cachedToken = null;
+let cachedExpiresAt = 0;
+
 async function getToken() {
+  const now = Date.now();
+  if (cachedToken && now < cachedExpiresAt) return cachedToken;
+
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
@@ -24,56 +29,100 @@ async function getToken() {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(`Token error: ${JSON.stringify(data)}`);
-  return data.access_token;
+  cachedToken = data.access_token;
+  cachedExpiresAt = now + (data.expires_in || 3600) * 1000 - 10_000;
+  return cachedToken;
+}
+
+async function spotifyFetch(url) {
+  const token = await getToken();
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401) {
+    cachedToken = null;
+    const token2 = await getToken();
+    return fetch(url, { headers: { Authorization: `Bearer ${token2}` } });
+  }
+  return res;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchWithRetry(url, retries = 3) {
+  for (let i = 0; i <= retries; i++) {
+    const res = await spotifyFetch(url);
+    if (res.status === 429) {
+      const retryAfter = Number(res.headers.get('retry-after') || '1');
+      await sleep((retryAfter + 0.5) * 1000);
+      continue;
+    }
+    return res;
+  }
+  return spotifyFetch(url);
 }
 
 async function crawlSpotify() {
-  const token = await getToken();
   const letters = 'abcdefghijklmnopqrstuvwxyz'.split('');
   const results = [];
+  const seen = new Set();
 
-  console.log('🚀 Start crawl Spotify...');
+  const MAX_OFFSET = Number(process.env.CRAWL_MAX_OFFSET || 1000);
+  const LIMIT = 50;
+  const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY || 6);
+
+  console.log('Start crawl Spotify...');
   let total = 0;
 
+  const tasks = [];
+
   for (const letter of letters) {
-    console.log(`\n🔤 Litera: ${letter}`);
-    for (let offset = 0; offset < 200; offset += 50) {
-      const url = `https://api.spotify.com/v1/search?q=${letter}&type=album&limit=50&offset=${offset}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
+    console.log(`\nLetter: ${letter}`);
+    for (let offset = 0; offset < MAX_OFFSET; offset += LIMIT) {
+      const url = `https://api.spotify.com/v1/search?q=${letter}&type=album&limit=${LIMIT}&offset=${offset}`;
+      tasks.push(async () => {
+        const res = await fetchWithRetry(url);
+        const data = await res.json();
 
-      // Obsługa błędów Spotify API
-      if (data.error) {
-        console.error(`❌ Błąd API: ${data.error.message}`);
-        break;
-      }
+        if (data.error) {
+          console.error(`API error: ${data.error.message}`);
+          return;
+        }
 
-      const items = data.albums?.items || [];
-      if (!items.length) {
-        console.log(`⚠️ Brak wyników (offset ${offset})`);
-        break;
-      }
+        const items = data.albums?.items || [];
+        if (!items.length) return;
 
-      const mapped = items.map((a) => ({
-        id: a.id,
-        title: a.name,
-        artist: a.artists?.[0]?.name,
-        artist_id: a.artists?.[0]?.id,
-        year: a.release_date ? a.release_date.split('-')[0] : null,
-        cover_url: a.images?.[0]?.url,
-        spotify_url: a.external_urls?.spotify,
-      }));
+        const mapped = items.map((a) => ({
+          id: a.id,
+          title: a.name,
+          artist: a.artists?.[0]?.name,
+          artist_id: a.artists?.[0]?.id,
+          year: a.release_date ? a.release_date.split('-')[0] : null,
+          cover_url: a.images?.[0]?.url,
+          spotify_url: a.external_urls?.spotify,
+        }));
 
-      results.push(...mapped);
-      total += mapped.length;
-
-      console.log(`✅ Offset ${offset}: pobrano ${mapped.length} albumów`);
-      await new Promise((r) => setTimeout(r, 400)); // mały delay, by nie zbanować
+        for (const m of mapped) {
+          if (seen.has(m.id)) continue;
+          seen.add(m.id);
+          results.push(m);
+          total += 1;
+        }
+      });
     }
   }
 
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      await tasks[i]();
+    }
+  }
+
+  const workers = Array.from({ length: CONCURRENCY }, () => worker());
+  await Promise.all(workers);
+
   fs.writeFileSync('spotify_albums.json', JSON.stringify(results, null, 2));
-  console.log(`\n🎉 Zakończono. Zapisano ${total} albumów do spotify_albums.json`);
+  console.log(`\nDone. Saved ${total} albums to spotify_albums.json`);
 }
 
-crawlSpotify().catch((err) => console.error('❌ Błąd:', err.message));
+crawlSpotify().catch((err) => console.error('Error:', err.message));

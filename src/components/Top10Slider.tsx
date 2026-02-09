@@ -115,7 +115,7 @@ export function Top10Slider({ albums, onToggleFavorite, onRate }: Props) {
 
   return (
     <section className="mb-12">
-      <h2 className="text-2xl md:text-3xl font-bold mb-6 flex items-center gap-3">🔥 Top 10 albumów</h2>
+      <h2 className="text-2xl md:text-3xl font-bold mb-6 text-center">🔥 Top 10 albumów</h2>
       <div
         className="relative"
         onMouseEnter={() => setIsHovering(true)}

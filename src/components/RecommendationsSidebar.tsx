@@ -75,7 +75,7 @@ export function RecommendationsSidebar({ newReleases, recommendations, topAlbums
   };
 
   return (
-    <aside className="hidden lg:block lg:w-[350px] xl:w-[400px] space-y-8 sticky top-20 self-start -mt-2">
+    <aside className="hidden lg:block lg:basis-[20%] xl:basis-[20%] 2xl:basis-[20%] space-y-8 sticky top-20 self-start -mt-2">
       {/* TOP SINGLE */}
       <div
         className="p-4 rounded-xl bg-white/50 dark:bg-black/20"
