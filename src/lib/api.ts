@@ -225,9 +225,29 @@ export async function fetchRecommendations(userId: string) {
 
 export async function fetchTopSingles(limit = 5) {
   try {
+    const { data: recentRatings, error: recentError } = await supabase
+      .from("track_ratings")
+      .select("track_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (recentError) throw recentError;
+
+    const orderedTrackIds: string[] = [];
+    const seen = new Set<string>();
+    for (const r of recentRatings || []) {
+      const id = r.track_id as string;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      orderedTrackIds.push(id);
+      if (orderedTrackIds.length >= limit) break;
+    }
+
+    if (orderedTrackIds.length === 0) return [];
+
     const { data: ratingsData, error: ratingsError } = await supabase
       .from("track_ratings")
-      .select("track_id, rating");
+      .select("track_id, rating")
+      .in("track_id", orderedTrackIds);
     if (ratingsError) throw ratingsError;
 
     const trackRatings = (ratingsData || []).reduce((acc, rating) => {
@@ -237,16 +257,14 @@ export async function fetchTopSingles(limit = 5) {
       return acc;
     }, {} as Record<string, { sum: number; count: number }>);
 
-    const tracksWithAvg = Object.entries(trackRatings)
-      .map(([track_id, data]) => ({
+    const tracksWithAvg = orderedTrackIds.map((track_id) => {
+      const data = trackRatings[track_id] || { sum: 0, count: 0 };
+      return {
         track_id,
-        avg_rating: Number((data.sum / data.count).toFixed(1)),
+        avg_rating: data.count ? Number((data.sum / data.count).toFixed(1)) : 0,
         votes: data.count,
-      }))
-      .sort((a, b) => b.avg_rating - a.avg_rating)
-      .slice(0, limit);
-
-    if (tracksWithAvg.length === 0) return [];
+      };
+    });
 
     const trackIds = tracksWithAvg.map((item) => item.track_id);
     const { data: tracksData, error: tracksError } = await supabase
@@ -291,7 +309,9 @@ export async function fetchTopSingles(limit = 5) {
       })
     );
 
-    return enriched;
+    // keep order by most recent rating
+    const orderMap = new Map(trackIds.map((id, idx) => [id, idx]));
+    return enriched.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
   } catch (error) {
     console.error("Error fetching top singles:", error);
     return [];

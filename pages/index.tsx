@@ -67,6 +67,7 @@ export default function HomePage() {
         {/* --- SEKCJA TOP 10 ALBUMÓW --- */}
         <Top10Slider
           albums={top10Albums}
+          singles={topSingles}
           onToggleFavorite={handleToggleFavorite}
           onRate={handleUpsertRating}
         />

@@ -1,6 +1,6 @@
 ﻿// pages/album/[id].tsx
 import { useRouter } from "next/router";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../../src/lib/supabaseClient";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,6 +24,9 @@ export default function AlbumDetails() {
   const [album, setAlbum] = useState<any>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [showTracks, setShowTracks] = useState(false);
+  const [tracksLoading, setTracksLoading] = useState(false);
+  const [tracksError, setTracksError] = useState<string | null>(null);
+  const lastTracksFetchRef = useRef<string | null>(null);
 
   const [reviews, setReviews] = useState<any[]>([]);
   const [newReview, setNewReview] = useState({ title: "", body: "" });
@@ -57,17 +60,62 @@ export default function AlbumDetails() {
   };
 
   // --------- Fetch Spotify tracks ---------
-  const fetchSpotifyTracks = useCallback(async (spotifyAlbumId?: string) => {
-    if (!spotifyAlbumId) return setTracks([]);
+  const fetchLocalTracks = useCallback(async () => {
+    if (!albumId) return [];
+    const { data } = await supabase
+      .from("tracks")
+      .select("id, title, duration, spotify_url, preview_url, track_number")
+      .eq("album_id", albumId)
+      .order("track_number", { ascending: true });
+    return Array.isArray(data) ? data : [];
+  }, [albumId]);
 
-    try {
-      const res = await fetch(`/api/spotify/tracks?album_id=${spotifyAlbumId}`);
-      const data = await res.json();
-      setTracks(Array.isArray(data) ? data : []);
-    } catch {
-      setTracks([]);
-    }
-  }, []);
+  const fetchSpotifyTracks = useCallback(
+    async (spotifyAlbumId?: string) => {
+      setTracksLoading(true);
+      setTracksError(null);
+
+      try {
+        let spotifyErr: string | null = null;
+        if (spotifyAlbumId) {
+          const res = await fetch(`/api/spotify/tracks?album_id=${spotifyAlbumId}`);
+          if (res.ok) {
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : [];
+            if (list.length > 0) {
+              setTracks(list);
+              return;
+            }
+          } else {
+            spotifyErr = await res.text();
+          }
+        }
+
+        const local = await fetchLocalTracks();
+        setTracks(local);
+        if (!local.length) {
+          if (spotifyErr && /too many requests/i.test(spotifyErr)) {
+            setTracksError("Limit Spotify został przekroczony — spróbuj ponownie za chwilę.");
+          } else if (spotifyErr) {
+            setTracksError(spotifyErr || "Błąd pobierania utworów z Spotify.");
+          } else if (!spotifyAlbumId) {
+            setTracksError("Brak utworów dla tego albumu.");
+          }
+        } else {
+          setTracksError(null);
+        }
+      } catch {
+        const local = await fetchLocalTracks();
+        setTracks(local);
+        if (!local.length) {
+          setTracksError("Błąd pobierania utworów.");
+        }
+      } finally {
+        setTracksLoading(false);
+      }
+    },
+    [fetchLocalTracks]
+  );
 
   // --------- Fetch album ---------
   const fetchAlbum = useCallback(async () => {
@@ -175,6 +223,16 @@ export default function AlbumDetails() {
       setLoading(false);
     }
   }, [albumId, fetchSpotifyTracks]);
+
+  useEffect(() => {
+    if (!showTracks) return;
+    if (!album?.spotify_id) return;
+    if (tracksLoading) return;
+    if (tracksError) return;
+    if (lastTracksFetchRef.current === album.spotify_id) return;
+    lastTracksFetchRef.current = album.spotify_id;
+    fetchSpotifyTracks(album.spotify_id);
+  }, [showTracks, album?.spotify_id, tracks.length, tracksLoading, fetchSpotifyTracks]);
 
   // --------- Fetch reviews ---------
   const fetchReviews = async () => {
@@ -475,6 +533,15 @@ return (
             </div>
           {showTracks && (
             <ol className="space-y-3 mb-6">
+              {tracksLoading && (
+                <li className="text-sm text-gray-400">Ładowanie utworów…</li>
+              )}
+              {!tracksLoading && tracksError && (
+                <li className="text-sm text-red-400">{tracksError}</li>
+              )}
+              {!tracksLoading && !tracksError && tracks.length === 0 && (
+                <li className="text-sm text-gray-400">Brak utworów dla tego albumu.</li>
+              )}
               {tracks.map((t, i) => (
                 <li
                   key={i}
