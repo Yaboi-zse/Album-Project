@@ -36,6 +36,26 @@ interface Album {
   [key: string]: any;
 }
 
+const sortAlbumsByVotesThenTitle = (items: Album[]): Album[] =>
+  [...items].sort((a, b) => {
+    const aVotes = Number(a.votes || 0);
+    const bVotes = Number(b.votes || 0);
+    const aHasVotes = aVotes > 0;
+    const bHasVotes = bVotes > 0;
+
+    if (aHasVotes && bHasVotes) {
+      const votesDiff = bVotes - aVotes;
+      if (votesDiff !== 0) return votesDiff;
+      return Number(b.avg_rating || 0) - Number(a.avg_rating || 0);
+    }
+
+    if (aHasVotes !== bHasVotes) return aHasVotes ? -1 : 1;
+
+    return String(a.title || "").localeCompare(String(b.title || ""), "pl", {
+      sensitivity: "base",
+    });
+  });
+
 
 export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: string }, limit: number) {
   // --- STATE MANAGEMENT ---
@@ -60,7 +80,7 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
 
       const [top10, topSinglesRes, releases, recs] = await Promise.all([
         api.fetchTop10Albums(),
-        api.fetchTopSingles(),
+        api.fetchTopSingles(10),
         api.fetchNewReleases(),
         user ? api.fetchRecommendations(user.id) : Promise.resolve([])
       ]);
@@ -83,7 +103,7 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
         limit,
     };
     const result = await api.fetchAlbums(apiFilters);
-    setAlbums(result.albums);
+    setAlbums(sortAlbumsByVotesThenTitle(result.albums));
     setTotal(result.total);
     setLoading(false);
   }, [
@@ -107,13 +127,15 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
 
   // --- DATA REFRESH & HANDLERS ---
   const refreshDynamicData = useCallback(async () => {
-    const [top10, filteredResult] = await Promise.all([
+    const [top10, topSinglesRes, filteredResult] = await Promise.all([
         api.fetchTop10Albums(),
+        api.fetchTopSingles(10),
         api.fetchAlbums({ ...filters, debouncedSearch, limit })
     ]);
     
     setTop10Albums(top10);
-    setAlbums(filteredResult.albums);
+    setTopSingles(topSinglesRes);
+    setAlbums(sortAlbumsByVotesThenTitle(filteredResult.albums));
     setTotal(filteredResult.total);
   }, [filters, debouncedSearch, limit]);
 

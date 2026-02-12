@@ -1,6 +1,6 @@
 ﻿// pages/index.tsx
 
-import React from 'react';
+import React, { useMemo } from 'react';
 
 // Importy hooków
 import { useFilters } from '../src/hooks/useFilters';
@@ -51,6 +51,29 @@ export default function HomePage() {
     ALBUMS_PER_PAGE
   );
 
+  const sortedAlbums = useMemo(
+    () =>
+      [...albums].sort((a: any, b: any) => {
+        const aVotes = Number(a.votes || 0);
+        const bVotes = Number(b.votes || 0);
+        const aHasVotes = aVotes > 0;
+        const bHasVotes = bVotes > 0;
+
+        if (aHasVotes && bHasVotes) {
+          const votesDiff = bVotes - aVotes;
+          if (votesDiff !== 0) return votesDiff;
+          return Number(b.avg_rating || 0) - Number(a.avg_rating || 0);
+        }
+
+        if (aHasVotes !== bHasVotes) return aHasVotes ? -1 : 1;
+
+        return String(a.title || "").localeCompare(String(b.title || ""), "pl", {
+          sensitivity: "base",
+        });
+      }),
+    [albums]
+  );
+
   return (
     <main
       className={`pt-24 pb-10 min-h-screen transition-colors duration-300 relative overflow-hidden
@@ -78,9 +101,9 @@ export default function HomePage() {
           <div className="flex-1">
             {loading ? (
               <div className="py-24 text-center text-gray-400">Ładowanie albumów...</div>
-            ) : albums.length > 0 ? (
+            ) : sortedAlbums.length > 0 ? (
               <div className="grid gap-x-6 gap-y-16 justify-items-start grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                {albums.map((album) => (
+                {sortedAlbums.map((album) => (
                   <AlbumCards
                     key={album.id}
                     album={album}

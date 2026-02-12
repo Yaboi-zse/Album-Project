@@ -121,9 +121,9 @@ export async function fetchAlbums(filters: AlbumFilters) {
     if (yearFrom) query = query.gte("year", parseInt(yearFrom));
     if (yearTo) query = query.lte("year", parseInt(yearTo));
     if (artistFilter) query = query.eq("artist_id", artistFilter);
+    // Keep DB order deterministic, but final ordering is applied after votes are computed.
     if (sortBy === "title") query = query.order("title", { ascending: true });
     else query = query.order("year", { ascending: false, nullsFirst: false });
-    query = query.range(offset, offset + limit - 1);
     const { data: albumRows, count: totalCount, error: queryError } = await query;
     if (queryError) throw queryError;
     if (!albumRows || albumRows.length === 0) return { albums: [], total: totalCount ?? 0 };
@@ -136,35 +136,112 @@ export async function fetchAlbums(filters: AlbumFilters) {
       return true;
     });
     const albumIds = dedupedRows.map((r: { id: string | number }) => r.id);
-    const [ratingsRes, favsRes, userRes] = await Promise.all([
-      supabase.from("ratings").select("album_id, rating").in("album_id", albumIds),
-      supabase.from("favorites").select("album_id, user_id").in("album_id", albumIds),
+    const chunkSize = 200;
+    const chunkedIds: Array<(string | number)[]> = [];
+    for (let i = 0; i < albumIds.length; i += chunkSize) {
+      chunkedIds.push(albumIds.slice(i, i + chunkSize));
+    }
+
+    const [ratingsChunks, favsChunks, userRes] = await Promise.all([
+      Promise.all(
+        chunkedIds.map((ids) =>
+          supabase.from("ratings").select("album_id, rating").in("album_id", ids)
+        )
+      ),
+      Promise.all(
+        chunkedIds.map((ids) =>
+          supabase.from("favorites").select("album_id, user_id").in("album_id", ids)
+        )
+      ),
       supabase.auth.getUser(),
     ]);
+
+    const ratingsData = ratingsChunks.flatMap((res) => {
+      if (res.error) throw res.error;
+      return res.data || [];
+    });
+    const favoritesData = favsChunks.flatMap((res) => {
+      if (res.error) throw res.error;
+      return res.data || [];
+    });
+
     const currentUser = userRes.data?.user;
     let userRatings: any[] = [];
     let userFavs: any[] = [];
     if (currentUser) {
-      const [ur, uf] = await Promise.all([
-        supabase.from("ratings").select("album_id, rating").eq("user_id", currentUser.id).in("album_id", albumIds),
-        supabase.from("favorites").select("album_id").eq("user_id", currentUser.id).in("album_id", albumIds),
+      const [userRatingsChunks, userFavChunks] = await Promise.all([
+        Promise.all(
+          chunkedIds.map((ids) =>
+            supabase
+              .from("ratings")
+              .select("album_id, rating")
+              .eq("user_id", currentUser.id)
+              .in("album_id", ids)
+          )
+        ),
+        Promise.all(
+          chunkedIds.map((ids) =>
+            supabase
+              .from("favorites")
+              .select("album_id")
+              .eq("user_id", currentUser.id)
+              .in("album_id", ids)
+          )
+        ),
       ]);
-      userRatings = ur.data || [];
-      userFavs = uf.data || [];
+
+      userRatings = userRatingsChunks.flatMap((res) => {
+        if (res.error) throw res.error;
+        return res.data || [];
+      });
+      userFavs = userFavChunks.flatMap((res) => {
+        if (res.error) throw res.error;
+        return res.data || [];
+      });
     }
-    const ratingsByAlbum = (ratingsRes.data || []).reduce((acc, r) => { (acc[r.album_id] = acc[r.album_id] || []).push(Number(r.rating)); return acc; }, {} as Record<string, number[]>);
-    const favCount = (favsRes.data || []).reduce((acc, f) => { acc[f.album_id] = (acc[f.album_id] || 0) + 1; return acc; }, {} as Record<string, number>);
+    const ratingsByAlbum = ratingsData.reduce((acc, r: any) => {
+      const key = String(r.album_id);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(Number(r.rating));
+      return acc;
+    }, {} as Record<string, number[]>);
+    const favCount = favoritesData.reduce((acc, f) => { acc[f.album_id] = (acc[f.album_id] || 0) + 1; return acc; }, {} as Record<string, number>);
     let combined = dedupedRows.map((a: Album) => ({
       ...a,
       artist_name: Array.isArray(a.artists) ? a.artists[0]?.name ?? "Nieznany artysta" : a.artists?.name ?? "Nieznany artysta",
-      avg_rating: (ratingsByAlbum[a.id as string] || []).length > 0 ? Number(((ratingsByAlbum[a.id as string] || []).reduce((s, x) => s + x, 0) / (ratingsByAlbum[a.id as string] || []).length).toFixed(1)) : "—",
-      votes: (ratingsByAlbum[a.id as string] || []).length,
+      avg_rating:
+        (ratingsByAlbum[String(a.id)] || []).length > 0
+          ? Number(
+              (
+                (ratingsByAlbum[String(a.id)] || []).reduce((s, x) => s + x, 0) /
+                (ratingsByAlbum[String(a.id)] || []).length
+              ).toFixed(1)
+            )
+          : "—",
+      votes: (ratingsByAlbum[String(a.id)] || []).length,
       favorites_count: favCount[a.id as string] || 0,
       is_favorite: userFavs.some((f) => f.album_id === a.id),
       user_rating: userRatings.find((ur) => ur.album_id === a.id) ? Number(userRatings.find((ur) => ur.album_id === a.id).rating) : null
     }));
     if (ratingMin) combined = combined.filter(album => album.avg_rating !== "—" && Number(album.avg_rating) >= Number(ratingMin));
-    return { albums: combined, total: totalCount ?? 0 };
+    combined = combined.sort((a, b) => {
+      const aVotes = Number(a.votes || 0);
+      const bVotes = Number(b.votes || 0);
+      const aHasVotes = aVotes > 0;
+      const bHasVotes = bVotes > 0;
+
+      if (aHasVotes && bHasVotes) {
+        const votesDiff = bVotes - aVotes;
+        if (votesDiff !== 0) return votesDiff;
+        return Number(b.avg_rating || 0) - Number(a.avg_rating || 0);
+      }
+
+      if (aHasVotes !== bHasVotes) return aHasVotes ? -1 : 1;
+
+      return String(a.title || "").localeCompare(String(b.title || ""), "pl", { sensitivity: "base" });
+    });
+    const paginated = combined.slice(offset, offset + limit);
+    return { albums: paginated, total: combined.length || totalCount || 0 };
   } catch (e) {
     console.error("Error in fetchAlbums:", e);
     return { albums: [], total: 0 };

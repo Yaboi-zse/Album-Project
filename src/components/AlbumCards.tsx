@@ -182,7 +182,7 @@ export function AlbumCards({
               <div className="flex items-center gap-2 text-yellow-400">
                 <span className="text-yellow-300">⭐</span>
                 <span className="font-bold text-white">{album.avg_rating ?? "—"}</span>
-                <span className="text-xs text-gray-400">({album.votes ?? 0} głosów)</span>
+                <span className="text-xs text-gray-400">({album.votes ?? 0} ocen)</span>
               </div>
             ) : (
               <span />
