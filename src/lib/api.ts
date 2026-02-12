@@ -310,8 +310,10 @@ export async function fetchTopSingles(limit = 5) {
     );
 
     // keep order by most recent rating
-    const orderMap = new Map(trackIds.map((id, idx) => [id, idx]));
-    return enriched.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+    const orderMap = new Map(trackIds.map((id, idx) => [String(id), idx]));
+    return enriched.sort(
+      (a, b) => (orderMap.get(String(a.id)) ?? 0) - (orderMap.get(String(b.id)) ?? 0)
+    );
   } catch (error) {
     console.error("Error fetching top singles:", error);
     return [];
