@@ -40,8 +40,10 @@ export function useFilters() {
     if (q.yearTo !== undefined) setYearTo(String(q.yearTo));
     else setYearTo("");
 
-    if (q.rmin !== undefined) setRatingMin(Number(q.rmin));
-    else setRatingMin("");
+    if (q.rmin !== undefined) {
+      const parsed = Number(q.rmin);
+      setRatingMin(Number.isFinite(parsed) && parsed > 0 ? parsed : "");
+    } else setRatingMin("");
 
     if (q.page !== undefined) setPage(Number(q.page));
     else setPage(1);
@@ -67,7 +69,7 @@ export function useFilters() {
     if (s.genreFilter) query.genre = s.genreFilter;
     if (s.yearFrom) query.yearFrom = s.yearFrom;
     if (s.yearTo) query.yearTo = s.yearTo;
-    if (s.ratingMin !== "") query.rmin = String(s.ratingMin);
+    if (s.ratingMin !== "" && Number(s.ratingMin) > 0) query.rmin = String(s.ratingMin);
     if (s.sortBy !== "title") query.sort = s.sortBy;
     if (s.page > 1) query.page = String(s.page);
 

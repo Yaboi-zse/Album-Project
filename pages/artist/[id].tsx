@@ -26,6 +26,7 @@ export default function ArtistPage() {
   const [avgArtistRating, setAvgArtistRating] = useState<number | null>(null);
   const [ratingsCount, setRatingsCount] = useState(0);
   const [favoritesCount, setFavoritesCount] = useState(0);
+  const [artistGenres, setArtistGenres] = useState<string[]>([]);
 
   const loadArtistAndAlbums = useCallback(async () => {
     if (!artistId) return;
@@ -40,6 +41,24 @@ export default function ArtistPage() {
       .eq("id", artistId)
       .maybeSingle();
     setArtist(artistData ?? null);
+
+    const { data: genreRows } = await supabase
+      .from("albums")
+      .select("genre")
+      .eq("artist_id", artistId)
+      .not("genre", "is", null);
+
+    const genreMap = new Map<string, string>();
+    for (const row of genreRows || []) {
+      const raw = String((row as any).genre || "");
+      for (const part of raw.split(",")) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (!genreMap.has(key)) genreMap.set(key, trimmed);
+      }
+    }
+    setArtistGenres(Array.from(genreMap.values()).sort((a, b) => a.localeCompare(b, "pl", { sensitivity: "base" })));
 
     const result = await api.fetchAlbums({
       page: 1,
@@ -150,6 +169,23 @@ export default function ArtistPage() {
               <p className="font-bold text-black dark:text-white">{artist?.name || "Nieznany artysta"}</p>
               <p className="text-sm mt-2">Data urodzenia: {artist?.birth_date ?? "—"}</p>
               <p className="text-sm">Kraj: {artist?.country ?? "—"}</p>
+              <div className="text-sm mt-2">
+                <p className="mb-1">Gatunki:</p>
+                {artistGenres.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {artistGenres.map((genre) => (
+                      <span
+                        key={genre}
+                        className="text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-800 dark:bg-white/10 dark:text-gray-200"
+                      >
+                        {genre}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">—</p>
+                )}
+              </div>
               {artist?.bio && (
                 <p className="text-sm text-gray-700 dark:text-gray-300 mt-3 whitespace-pre-line">
                   {artist.bio}

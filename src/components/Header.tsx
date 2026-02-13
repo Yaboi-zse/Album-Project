@@ -67,6 +67,8 @@ export default function Header() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const filtersPanelRef = useRef<HTMLDivElement | null>(null);
+  const filtersButtonRef = useRef<HTMLButtonElement | null>(null);
   const suggestionDebounceRef = useRef<number | null>(null);
 
   // FILTER PRESETS (persisted to localStorage)
@@ -76,14 +78,14 @@ export default function Header() {
       if (!raw) {
         return [
           { name: "Rock Classics", genres: ["rock", "classic rock"], years: "1970-1990" },
-          { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2024" },
+          { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2026" },
         ];
       }
       return JSON.parse(raw);
     } catch {
       return [
         { name: "Rock Classics", genres: ["rock", "classic rock"], years: "1970-1990" },
-        { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2024" },
+        { name: "Electronic", genres: ["electronic", "techno", "house"], years: "2010-2026" },
       ];
     }
   };
@@ -408,6 +410,26 @@ export default function Header() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  // click outside filters panel to close
+  useEffect(() => {
+    if (!showFilters) return;
+
+    const onDoc = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (filtersButtonRef.current && filtersButtonRef.current.contains(target)) return;
+      if (filtersPanelRef.current && filtersPanelRef.current.contains(target)) return;
+      setShowFilters(false);
+    };
+
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("touchstart", onDoc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("touchstart", onDoc);
+    };
+  }, [showFilters]);
+
   // clear suggestions on route change
   useEffect(() => {
     const onRoute = () => {
@@ -476,8 +498,8 @@ export default function Header() {
   // -----------------------
   const applyQuickNewReleases = () => {
     setYearFrom("2020");
-    setYearTo("2024");
-    applyFiltersToURL({ yearFrom: "2020", yearTo: "2024", page: 1 });
+    setYearTo("2026");
+    applyFiltersToURL({ yearFrom: "2020", yearTo: "2026", page: 1 });
   };
 
   const applyQuickTopRatings = () => {
@@ -517,7 +539,7 @@ export default function Header() {
   // handle enter in search
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      applyFiltersToURL();
+      applyFiltersToURL({ page: 1 });
       setShowSuggestions(false);
     } else if (e.key === "Escape") {
       setShowSuggestions(false);
@@ -581,7 +603,8 @@ export default function Header() {
             <div className="flex-1 flex items-center justify-center px-4">
               <div className="w-full max-w-2xl relative" ref={searchBoxRef}>
                 {/* Search input */}
-                <div className="flex items-center gap-3">
+                <div className="relative flex items-center gap-2 rounded-2xl border border-cyan-200/70 dark:border-cyan-900/60 bg-white/90 dark:bg-[#0a1118]/90 shadow-[0_8px_28px_rgba(5,12,20,0.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.45)] px-2 py-2 backdrop-blur-md transition">
+                  <div className="pl-2 text-base text-cyan-500 dark:text-cyan-300">⌕</div>
                   <input
                     type="text"
                     placeholder="Szukaj albumów lub utworów..."
@@ -594,7 +617,7 @@ export default function Header() {
                         setShowSuggestions(true);
                       }
                     }}
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                    className="w-full bg-transparent px-1 py-2 pr-2 rounded-xl text-sm md:text-[15px] border-0 outline-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-0"
                     aria-label="Szukaj albumów lub utworów"
                   />
 
@@ -602,15 +625,17 @@ export default function Header() {
                   {search && (
                     <button
                       onClick={clearSearch}
-                      className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-[#121617] transition"
+                      className="h-9 w-9 inline-flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-[#121922] text-gray-500 dark:text-gray-300 hover:text-red-500 hover:border-red-300 dark:hover:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                       title="Wyczyść"
-                    >✖</button>
+                    >
+                      ✕
+                    </button>
                   )}
 
                   {/* apply */}
                   <button
-                    onClick={() => { applyFiltersToURL(); setShowSuggestions(false); }}
-                    className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-[#121617] transition"
+                    onClick={() => { applyFiltersToURL({ page: 1 }); setShowSuggestions(false); }}
+                    className="h-9 w-9 inline-flex items-center justify-center rounded-xl border border-cyan-200 dark:border-cyan-800 bg-gradient-to-br from-cyan-400/20 to-blue-500/20 dark:from-cyan-500/20 dark:to-blue-700/25 text-cyan-700 dark:text-cyan-200 hover:brightness-110 transition"
                     title="Szukaj"
                   >
                     🔍
@@ -618,38 +643,39 @@ export default function Header() {
 
                   {/* Filters button */}
                   <button
+                    ref={filtersButtonRef}
                     onClick={() => setShowFilters(s => !s)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${
-                      showFilters ? "bg-blue-500 text-white border-blue-500" : hasActiveFilters
-                        ? "bg-orange-100 border-orange-300 text-orange-700 dark:bg-orange-900 dark:border-orange-700 dark:text-orange-300"
-                        : "border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0f1418] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#121617]"
+                    className={`min-w-[108px] px-3 py-2 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 border ${
+                      showFilters ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white border-transparent shadow-[0_6px_16px_rgba(14,165,233,0.35)]" : hasActiveFilters
+                        ? "bg-amber-100/90 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700/60 dark:text-amber-200"
+                        : "border-gray-300 dark:border-gray-700 bg-white/80 dark:bg-[#101722] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#121d2a]"
                     }`}
                     aria-expanded={showFilters}
                     aria-controls="filters-panel"
                   >
-                    <span>⚙</span>
+                    <span className="text-sm">⚙</span>
                     <span className="hidden sm:inline">Filtry</span>
 
                       {hasActiveFilters && (
                         <div className="flex gap-1 items-center ml-2">
                           {search && (
-                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: NEON.blue, color: "#001" }}>
-                              🔍
+                            <span className="h-5 min-w-5 px-1 rounded-full inline-flex items-center justify-center text-[10px] font-bold" style={{ background: NEON.blue, color: "#001" }}>
+                              S
                             </span>
                           )}
                           {genres.length > 0 && (
-                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.purple, color: "#001" }}>
-                              🎵 {genres.length}
+                            <span className="h-5 min-w-5 px-1 rounded-full inline-flex items-center justify-center text-[10px] font-bold" style={{ background: NEON.purple, color: "#001" }}>
+                              G{genres.length}
                             </span>
                           )}
                           {(yearFrom || yearTo) && (
-                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: NEON.cyan, color: "#001" }}>
-                              📅
+                            <span className="h-5 min-w-5 px-1 rounded-full inline-flex items-center justify-center text-[10px] font-bold" style={{ background: NEON.cyan, color: "#001" }}>
+                              Y
                             </span>
                           )}
                           {ratingMin && (
-                            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]" style={{ background: "#ffca28", color: "#001" }}>
-                              ⭐
+                            <span className="h-5 min-w-5 px-1 rounded-full inline-flex items-center justify-center text-[10px] font-bold" style={{ background: "#ffca28", color: "#001" }}>
+                              R
                             </span>
                           )}
                         </div>
@@ -665,15 +691,15 @@ export default function Header() {
                         initial={{ opacity: 0, y: -6 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -6 }}
-                        className="bg-white dark:bg-[#0b0f14] border border-gray-200 dark:border-gray-800 rounded-lg shadow-lg overflow-hidden"
+                        className="bg-white/95 dark:bg-[#0b1118]/95 border border-cyan-100 dark:border-cyan-900/40 rounded-2xl shadow-[0_18px_38px_rgba(2,6,23,0.18)] dark:shadow-[0_20px_42px_rgba(0,0,0,0.55)] overflow-hidden backdrop-blur-md"
                       >
-                        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                        <ul className="divide-y divide-gray-100/80 dark:divide-gray-800/80">
                           {searchSuggestions.map((sug, i) => (
                             <li key={i}>
                               <button
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => handleSuggestionSelect(sug)}
-                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-[#0f1418] transition"
+                                className="w-full text-left px-4 py-2.5 text-sm hover:bg-cyan-50/70 dark:hover:bg-cyan-900/10 transition"
                               >
                                 <span className="flex items-center gap-2">
                                   <span className="truncate">{sug.label}</span>
@@ -726,17 +752,18 @@ export default function Header() {
           <AnimatePresence>
             {showFilters && (
               <motion.div
+                ref={filtersPanelRef}
                 id="filters-panel"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.18 }}
-                className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#071018] transition-colors"
+                className="border-t border-gray-200/80 dark:border-gray-800/80 bg-gradient-to-b from-white to-[#f6fbff] dark:from-[#071018] dark:to-[#050b12] transition-colors"
               >
                 <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                   {/* LEFT: Genres + quick filters + presets */}
-                  <div className="lg:col-span-2">
+                  <div className="lg:col-span-2 rounded-2xl border border-cyan-100 dark:border-cyan-900/40 bg-white/80 dark:bg-[#0b121b]/70 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.35)]">
                     <div className="flex items-center justify-between mb-3">
                       <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">🎵 Gatunki {genres.length > 0 && `(${genres.length} wybranych)`}
                       </p>
@@ -747,19 +774,23 @@ export default function Header() {
                           placeholder="Szukaj gatunku..."
                           value={genreSearch}
                           onChange={(e) => setGenreSearch(e.target.value)}
-                          className="px-3 py-1 rounded-lg text-sm w-36 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0f14] text-gray-900 dark:text-gray-100 focus:outline-none"
+                          className="px-3 py-1.5 rounded-xl text-sm w-40 border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-[#0b0f14] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
                         />
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
+                    <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1 pr-2">
                       {filteredGenres.map((g) => {
                         const active = genres.includes(g);
                         return (
                           <button
                             key={g}
                             onClick={() => handleGenreToggle(g)}
-                            className={`px-3 py-1.5 rounded-full text-sm border transition-all ${active ? "bg-blue-500 text-white border-blue-600" : "bg-gray-100 dark:bg-[#071018] text-gray-800 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-[#0b1316]"}`}
+                            className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+                              active
+                                ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white border-transparent shadow-[0_0_0_1px_rgba(255,255,255,0.1)_inset]"
+                                : "bg-white/75 dark:bg-[#071018] text-gray-800 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:bg-cyan-50 dark:hover:bg-[#0b1316]"
+                            }`}
                           >
                             {g}
                           </button>
@@ -773,22 +804,22 @@ export default function Header() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={applyQuickNewReleases}
-                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all hover:translate-y-[-1px]"
                           style={{
-                            background: "rgba(0,234,255,0.08)",
-                            border: "1px solid rgba(0,234,255,0.18)",
+                            background: "linear-gradient(120deg, rgba(0,234,255,0.12), rgba(0,180,255,0.06))",
+                            border: "1px solid rgba(0,234,255,0.24)",
                             color: NEON.blue,
                           }}
                         >
-                          📅 Nowości (2020-2024)
+                          📅 Nowości (2020-2026)
                         </button>
 
                         <button
                           onClick={applyQuickTopRatings}
-                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all hover:translate-y-[-1px]"
                           style={{
-                            background: "rgba(255,45,255,0.08)",
-                            border: "1px solid rgba(255,45,255,0.18)",
+                            background: "linear-gradient(120deg, rgba(255,45,255,0.1), rgba(138,43,226,0.08))",
+                            border: "1px solid rgba(255,45,255,0.24)",
                             color: NEON.magenta,
                           }}
                         >
@@ -797,10 +828,10 @@ export default function Header() {
 
                         <button
                           onClick={() => { clearAllFilters(); }}
-                          className="px-3 py-1.5 rounded-full text-sm border transition-all"
+                          className="px-3 py-1.5 rounded-full text-sm border transition-all hover:translate-y-[-1px]"
                           style={{
-                            background: "rgba(255,255,255,0.03)",
-                            border: "1px solid rgba(255,255,255,0.08)",
+                            background: "rgba(148,163,184,0.08)",
+                            border: "1px solid rgba(148,163,184,0.24)",
                             color: "#9fb6d6",
                           }}
                         >
@@ -816,7 +847,7 @@ export default function Header() {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setShowPresetsEditor(s => !s)}
-                            className="text-xs px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-700 dark:text-gray-100"
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/85 dark:bg-[#071018] text-gray-700 dark:text-gray-100 hover:bg-cyan-50 dark:hover:bg-[#0d1621] transition"
                           >
                             {showPresetsEditor ? "Anuluj" : "Zapisz preset"}
                           </button>
@@ -830,8 +861,8 @@ export default function Header() {
                               onClick={() => applyPreset(preset)}
                               className="px-3 py-1.5 rounded-full text-sm border transition-all hover:scale-105"
                               style={{
-                                background: "linear-gradient(45deg, rgba(138,43,226,0.06), rgba(0,234,255,0.06))",
-                                border: "1px solid rgba(138,43,226,0.12)",
+                                background: "linear-gradient(45deg, rgba(138,43,226,0.12), rgba(0,234,255,0.1))",
+                                border: "1px solid rgba(138,43,226,0.22)",
                                 color: NEON.purple,
                               }}
                             >
@@ -897,7 +928,7 @@ export default function Header() {
                   </div>
 
                   {/* RIGHT: Year, Rating slider, actions */}
-                  <div className="space-y-4">
+                  <div className="space-y-5 rounded-2xl border border-fuchsia-100 dark:border-fuchsia-900/35 bg-white/80 dark:bg-[#0d111a]/70 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.35)]">
                     {/* Year */}
                     <div>
                       <p className="font-semibold mb-2 text-sm text-gray-700 dark:text-gray-300">Rok wydania</p>
@@ -907,14 +938,14 @@ export default function Header() {
                           placeholder="Od"
                           value={yearFrom || ""}
                           onChange={e => setYearFrom(e.target.value)}
-                          className="w-1/2 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                          className="w-1/2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-[#0b0f14] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                         />
                         <input
                           type="number"
                           placeholder="Do"
                           value={yearTo || ""}
                           onChange={e => setYearTo(e.target.value)}
-                          className="w-1/2 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#071018] text-gray-900 dark:text-gray-100 text-sm"
+                          className="w-1/2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-[#0b0f14] text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                         />
                       </div>
                     </div>
@@ -931,8 +962,11 @@ export default function Header() {
                           max={10}
                           step={1}
                           value={Number(ratingMin || 0)}
-                          onChange={e => setRatingMin(Number(e.target.value))}
-                          className="flex-1"
+                          onChange={e => {
+                            const n = Number(e.target.value);
+                            setRatingMin(n > 0 ? n : "");
+                          }}
+                          className="flex-1 accent-cyan-400"
                           aria-label="Minimalna ocena"
                         />
                         <div className="w-12 text-center font-bold" style={{ color: NEON.cyan }}>
@@ -981,22 +1015,22 @@ export default function Header() {
                     {/* Actions */}
                     <div className="flex gap-3 mt-4">
                       <button
-                        onClick={() => { applyFiltersToURL(); setShowFilters(false); }}
-                        className="flex-1 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white"
+                        onClick={() => { applyFiltersToURL({ page: 1 }); setShowFilters(false); }}
+                        className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:brightness-110 text-white shadow-[0_8px_20px_rgba(14,165,233,0.35)] transition"
                       >
                         Zastosuj filtry
                       </button>
 
                       <button
                         onClick={() => { clearAllFilters(); }}
-                        className="px-4 py-2 rounded-lg border"
+                        className="px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white/80 dark:bg-[#101722] hover:bg-gray-50 dark:hover:bg-[#121d2a] transition"
                       >
                         Wyczyść
                       </button>
 
                       <button
                         onClick={() => setShowFilters(false)}
-                        className="px-4 py-2 rounded-lg bg-gray-600 text-white"
+                        className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-white transition"
                       >
                         Zamknij
                       </button>

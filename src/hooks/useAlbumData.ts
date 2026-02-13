@@ -127,17 +127,19 @@ export function useAlbumData(filters: Omit<Filters, 'search'> & { search?: strin
 
   // --- DATA REFRESH & HANDLERS ---
   const refreshDynamicData = useCallback(async () => {
-    const [top10, topSinglesRes, filteredResult] = await Promise.all([
+    const [top10, topSinglesRes, filteredResult, recs] = await Promise.all([
         api.fetchTop10Albums(),
         api.fetchTopSingles(10),
-        api.fetchAlbums({ ...filters, debouncedSearch, limit })
+        api.fetchAlbums({ ...filters, debouncedSearch, limit }),
+        currentUser ? api.fetchRecommendations(currentUser.id) : Promise.resolve([])
     ]);
     
     setTop10Albums(top10);
     setTopSingles(topSinglesRes);
     setAlbums(sortAlbumsByVotesThenTitle(filteredResult.albums));
+    setRecommendations(recs);
     setTotal(filteredResult.total);
-  }, [filters, debouncedSearch, limit]);
+  }, [filters, debouncedSearch, limit, currentUser]);
 
 
   const handleToggleFavorite = useCallback(async (albumId: string | number, isCurrentlyFavorite: boolean) => {
